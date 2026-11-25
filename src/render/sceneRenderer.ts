@@ -1,0 +1,216 @@
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import type { World } from '../sim/world';
+import type { CollisionEvent } from '../sim/collision';
+import type { TopDefinition } from '../content/tops';
+import { WORLD_SCALE } from './coords';
+import { buildStadium } from './stadiumMesh';
+import { buildTopModel, disposeMaterialCache, type TopModel } from './topModels';
+import { ImpactRings, Sparks, Trail } from './effects';
+import { DebugDraw, type DebugFlags } from './debugDraw';
+import type { StadiumSurface } from '../sim/stadium/types';
+
+const S = WORLD_SCALE;
+/** Camera elevation above the horizon, radians (fixed, angled overhead). */
+const CAMERA_ELEVATION = THREE.MathUtils.degToRad(55);
+const MAX_PIXEL_RATIO = 2;
+
+/**
+ * Three.js presentation of a World. Reads simulation state, never writes
+ * it. Interpolates between the previous and current fixed step using the
+ * runner's alpha so motion is smooth at any display refresh rate.
+ */
+export class SceneRenderer {
+  readonly renderer: THREE.WebGLRenderer;
+  readonly scene = new THREE.Scene();
+  readonly camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
+  private stadiumGroup: THREE.Group | null = null;
+  private stadiumRef: StadiumSurface | null = null;
+  private models: TopModel[] = [];
+  private trails: Trail[] = [];
+  private readonly sparks = new Sparks();
+  private readonly rings = new ImpactRings();
+  readonly debug = new DebugDraw();
+  private readonly envTex: THREE.Texture;
+  private readonly keyLight: THREE.DirectionalLight;
+  private world: World | null = null;
+  private readonly q = new THREE.Quaternion();
+  private readonly axis = new THREE.Vector3();
+  private readonly grad = { x: 0, y: 0 };
+
+  constructor(canvas: HTMLCanvasElement) {
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO));
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+    this.scene.background = new THREE.Color(0x0b0e13);
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
+    this.scene.environment = this.envTex;
+    this.scene.environmentIntensity = 0.8;
+
+    this.scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x20242b, 0.9));
+    const key = new THREE.DirectionalLight(0xffffff, 2.2);
+    key.position.set(-2.5, 6, 2.5);
+    key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
+    const sc = key.shadow.camera;
+    sc.left = -2.6;
+    sc.right = 2.6;
+    sc.top = 2.6;
+    sc.bottom = -2.6;
+    sc.near = 1;
+    sc.far = 14;
+    key.shadow.bias = -0.0005;
+    key.shadow.normalBias = 0.02;
+    key.shadow.radius = 3;
+    this.keyLight = key;
+    this.scene.add(key);
+    const rim = new THREE.DirectionalLight(0xff9a50, 0.6);
+    rim.position.set(3, 2.5, -3);
+    this.scene.add(rim);
+
+    this.scene.add(this.sparks.points, this.rings.group, this.debug.group);
+  }
+
+  /** Attach a new world (on battle start/reset). Rebuilds top models. */
+  setWorld(world: World, defs: TopDefinition[]): void {
+    this.world = world;
+    if (this.stadiumRef !== world.stadium) {
+      if (this.stadiumGroup) {
+        this.scene.remove(this.stadiumGroup);
+        disposeObject(this.stadiumGroup);
+      }
+      this.stadiumGroup = buildStadium(world.stadium);
+      this.scene.add(this.stadiumGroup);
+      this.stadiumRef = world.stadium;
+    }
+    for (const m of this.models) {
+      this.scene.remove(m.root);
+      m.dispose();
+    }
+    for (const t of this.trails) {
+      this.scene.remove(t.mesh);
+      t.dispose();
+    }
+    this.models = defs.map((d) => buildTopModel(d));
+    this.trails = defs.map((d) => new Trail(d.palette.accent, 48, 0.09, 0.32, 0.02));
+    for (const m of this.models) this.scene.add(m.root);
+    for (const t of this.trails) this.scene.add(t.mesh);
+    this.sparks.clear();
+    this.rings.clear();
+    this.debug.setWorld(world, defs.map((d) => d.palette.accent));
+    this.frameCamera();
+  }
+
+  onCollisions(events: CollisionEvent[], showContacts: boolean): void {
+    const w = this.world;
+    if (!w) return;
+    for (const ev of events) {
+      // Effect intensity scales with impact speed (0 … 1).
+      const intensity = Math.min(1, ev.normalSpeed / (ev.kind === 'wall' ? 1.6 : 1.0));
+      if (intensity < 0.05) continue;
+      const y = (w.stadium.height(ev.x, ev.y) + 0.018) * S;
+      this.sparks.emit(ev.x * S, y, -ev.y * S, ev.nx, -ev.ny, intensity);
+      if (ev.kind === 'top' && intensity > 0.15) this.rings.emit(ev.x * S, y - 0.1, -ev.y * S, intensity);
+      if (showContacts) this.debug.addContact(ev, w);
+    }
+  }
+
+  render(alpha: number, dt: number, flags: DebugFlags): void {
+    const w = this.world;
+    if (w) {
+      w.bodies.forEach((b, i) => {
+        const m = this.models[i];
+        if (!m) return;
+        const x = b.px + (b.x - b.px) * alpha;
+        const y = b.py + (b.y - b.py) * alpha;
+        const h = w.stadium.height(x, y);
+        m.root.position.set(x * S, h * S, -y * S);
+        // Visual axis = wobble tilt + partial lean with the surface normal
+        // (the normal tilts downhill, i.e. along −gradient).
+        w.stadium.gradient(x, y, this.grad);
+        const tx = b.tiltX - this.grad.x * 0.5;
+        const ty = b.tiltY - this.grad.y * 0.5;
+        const t = Math.hypot(tx, ty);
+        if (t > 1e-6) {
+          // Lean direction in three space: (tx, 0, −ty); axis = up × dir.
+          this.axis.set(-ty / t, 0, -tx / t);
+          this.q.setFromAxisAngle(this.axis, Math.min(t, 1.3));
+          m.tilt.quaternion.copy(this.q);
+        } else m.tilt.quaternion.identity();
+        m.spin.rotation.y = b.prevAngle + (b.angle - b.prevAngle) * alpha;
+        this.trails[i]?.push(x * S, h * S + 0.03, -y * S);
+      });
+      this.debug.update(w, alpha, flags, dt);
+      this.debug.setSlopeVisible(w, flags.slope);
+    }
+    this.sparks.update(dt);
+    this.rings.update(dt);
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  resetTrails(): void {
+    for (const t of this.trails) t.reset();
+  }
+
+  /** Resize to the canvas' CSS size and refit the camera. */
+  resize(width: number, height: number): void {
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO));
+    this.renderer.setSize(width, height, false);
+    this.camera.aspect = width / Math.max(1, height);
+    this.camera.updateProjectionMatrix();
+    this.frameCamera();
+  }
+
+  /**
+   * Fixed angled overhead camera, distance chosen so the whole stadium
+   * (with housing) fits both vertically and horizontally for the current
+   * aspect ratio — keeps framing correct in portrait and landscape.
+   */
+  private frameCamera(): void {
+    const R = (this.stadiumRef?.boundingRadius ?? 0.2) * S + 0.4;
+    const vFov = THREE.MathUtils.degToRad(this.camera.fov);
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * this.camera.aspect);
+    // Vertical extent of a tilted disc ≈ R·sin(elevation) plus housing depth.
+    const vExtent = R * Math.sin(CAMERA_ELEVATION) + 0.35 * Math.cos(CAMERA_ELEVATION);
+    const dV = vExtent / Math.tan(vFov / 2) + R * Math.cos(CAMERA_ELEVATION);
+    const dH = R / Math.tan(hFov / 2) + R * Math.cos(CAMERA_ELEVATION) * 0.5;
+    const d = Math.max(dV, dH) * 1.04;
+    this.camera.position.set(0, Math.sin(CAMERA_ELEVATION) * d, Math.cos(CAMERA_ELEVATION) * d);
+    this.camera.lookAt(0, -0.05, 0);
+    this.camera.far = d * 3;
+    this.camera.updateProjectionMatrix();
+  }
+
+  dispose(): void {
+    for (const m of this.models) m.dispose();
+    for (const t of this.trails) t.dispose();
+    this.sparks.dispose();
+    this.rings.dispose();
+    this.debug.dispose();
+    if (this.stadiumGroup) disposeObject(this.stadiumGroup);
+    disposeMaterialCache();
+    this.envTex.dispose();
+    this.keyLight.shadow.map?.dispose();
+    this.renderer.dispose();
+  }
+}
+
+function disposeObject(o: THREE.Object3D): void {
+  o.traverse((c) => {
+    const m = c as THREE.Mesh;
+    m.geometry?.dispose();
+    const mat = m.material as (THREE.Material & { map?: THREE.Texture | null }) | THREE.Material[] | undefined;
+    if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
+    else if (mat) {
+      mat.map?.dispose();
+      mat.dispose();
+    }
+  });
+}
