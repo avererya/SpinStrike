@@ -1,4 +1,5 @@
 import type { TopPhysicsParams } from './topParams';
+import { DEFAULT_TOP_COMBAT, type FinishKind, type TopCombatStats } from './combat';
 import { inertiaOf } from './topParams';
 import { GRAVITY } from './units';
 
@@ -55,13 +56,40 @@ export class TopBody {
   maxSpeed = 0;
   /** Count of numerical-guard interventions (should stay 0). */
   guardTrips = 0;
-  /** Cumulative impact energy received (for future damage systems), J. */
+  /** Cumulative impact energy received, J. */
   impactEnergyReceived = 0;
+
+  // --- combat (v0.2) ---
+  /** Structural integrity. Independent of rotational energy (stamina). */
+  health: number;
+  damageDealt = 0;
+  damageReceived = 0;
+  /** Damaging impacts in which this top dealt damage. */
+  hitsLanded = 0;
+  /** Largest single damaging hit this top dealt. */
+  strongestHit = 0;
+  /** Set when the top burst or was knocked out (it then leaves active physics). */
+  eliminated: Exclude<FinishKind, 'spin'> | null = null;
+  eliminatedStep = -1;
+  /** Index of the top that caused the burst (−1 = none). */
+  finishSource = -1;
+  /** Burst: damage of the decisive hit. Knockout: upward exit speed, m/s. */
+  finishIntensity = 0;
+  /** Direction of the decisive impact / exit (unit vector, sim plane). */
+  finishDirX = 0;
+  finishDirY = 0;
+  /** Step of the most recent damaging top–top impact and its Δv (for rim lift). */
+  lastImpactStep = -1e9;
+  lastImpactDv = 0;
+  readonly combat: TopCombatStats;
 
   constructor(
     readonly index: number,
     readonly params: TopPhysicsParams,
+    combat: TopCombatStats = DEFAULT_TOP_COMBAT,
   ) {
+    this.combat = { ...combat };
+    this.health = Math.max(0, combat.maxHealth);
     this.inertia = inertiaOf(params);
     this.invMass = 1 / params.mass;
     this.invInertia = 1 / this.inertia;
@@ -71,6 +99,16 @@ export class TopBody {
     const l = this.effectiveComHeight;
     const iPerp = 0.5 * this.inertia + params.mass * l * l;
     this.criticalSpin = Math.sqrt(4 * params.mass * GRAVITY * l * iPerp) / this.inertia;
+  }
+
+  /** Health as a fraction of maximum (0–1). */
+  get healthFraction(): number {
+    return this.combat.maxHealth > 0 ? Math.max(0, Math.min(1, this.health / this.combat.maxHealth)) : 0;
+  }
+
+  /** True while the top is still a physical participant (not burst / knocked out). */
+  get active(): boolean {
+    return this.eliminated === null;
   }
 
   get speed(): number {

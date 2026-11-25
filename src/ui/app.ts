@@ -7,7 +7,26 @@ import { SceneRenderer } from '../render/sceneRenderer';
 import { DEFAULT_DEBUG_FLAGS, type DebugFlags } from '../render/debugDraw';
 import { DevPanel, TOP_OPTIONS } from './devPanel';
 import { Hud } from './hud';
-import { el } from './dom';
+import { el, hex } from './dom';
+import type { FinishKind } from '../sim/combat';
+
+const FINISH_LABEL: Record<FinishKind, string> = { burst: 'BURST FINISH', knockout: 'KNOCKOUT FINISH', spin: 'SPIN FINISH' };
+/** Presentation timings (real seconds). Never affect the simulated result. */
+const SLOWMO_FACTOR = 0.3;
+const SLOWMO_TIME = 0.7;
+const BANNER_DELAY = 0.25;
+const RESULT_DELAY_CINEMATIC = 1.6;
+const RESULT_DELAY_PLAIN = 0.4;
+const DAMAGE_NUMBER_POOL = 12;
+const DAMAGE_NUMBER_LIFE = 0.9;
+const DAMAGE_NUMBER_MIN = 1;
+
+interface DamageNumber {
+  el: HTMLElement;
+  x: number;
+  y: number;
+  life: number;
+}
 
 type Status = 'ready' | 'running' | 'paused' | 'finished';
 
@@ -23,6 +42,13 @@ export class SandboxApp {
   private flags: DebugFlags = { ...DEFAULT_DEBUG_FLAGS };
   private status: Status = 'ready';
   private resultShown = false;
+  /** Seconds since the result was decided (presentation clock), −1 before. */
+  private finishClock = -1;
+  private bannerShown = false;
+  private readonly banner: HTMLElement;
+  private readonly dmgLayer: HTMLElement;
+  private readonly dmgNums: DamageNumber[] = [];
+  private dmgNext = 0;
   private lastTime = 0;
   private fps = 60;
   private stepMs = 0;
@@ -42,6 +68,7 @@ export class SandboxApp {
   private readonly result: HTMLElement;
   private readonly resultText: HTMLElement;
   private readonly resultSub: HTMLElement;
+  private readonly resultTable: HTMLElement;
   private readonly stats: HTMLElement;
   private readonly errorBox: HTMLElement;
 
@@ -82,7 +109,7 @@ export class SandboxApp {
     });
 
     const toolbar = el('header', { class: 'toolbar' }, [
-      el('div', { class: 'brand' }, [el('span', { class: 'logo', text: 'SpinStrike' }), el('span', { class: 'tag', text: 'v0.1 sandbox' })]),
+      el('div', { class: 'brand' }, [el('span', { class: 'logo', text: 'SpinStrike' }), el('span', { class: 'tag', text: 'v0.2 combat sandbox' })]),
       el('div', { class: 'tb-group picks' }, [
         el('label', { class: 'pick' }, [el('span', { text: 'Player' }), this.playerSel]),
         el('span', { class: 'vs', text: 'vs' }),
@@ -94,6 +121,7 @@ export class SandboxApp {
 
     this.resultText = el('div', { class: 'result-title' });
     this.resultSub = el('div', { class: 'result-sub' });
+    this.resultTable = el('div', { class: 'result-table' });
     const rSame = el('button', { class: 'btn primary', text: 'Restart (same seed)' });
     rSame.addEventListener('click', () => this.rebuild(true));
     const rNew = el('button', { class: 'btn', text: 'New seed' });
@@ -106,11 +134,19 @@ export class SandboxApp {
     this.result = el('div', { class: 'result', role: 'dialog', 'aria-live': 'polite' }, [
       this.resultText,
       this.resultSub,
+      this.resultTable,
       el('div', { class: 'btn-row' }, [rSame, rNew, rClose]),
     ]);
+    this.banner = el('div', { class: 'finish-banner', 'aria-live': 'assertive' });
+    this.dmgLayer = el('div', { class: 'dmg-layer', 'aria-hidden': 'true' });
+    for (let i = 0; i < DAMAGE_NUMBER_POOL; i++) {
+      const d = el('div', { class: 'dmg-num' });
+      this.dmgLayer.append(d);
+      this.dmgNums.push({ el: d, x: 0, y: 0, life: 0 });
+    }
     this.stats = el('pre', { class: 'stats' });
     this.errorBox = el('div', { class: 'error-box' });
-    this.stage = el('main', { class: 'stage' }, [this.canvas, this.hud.root, this.result, this.stats, this.errorBox]);
+    this.stage = el('main', { class: 'stage' }, [this.canvas, this.dmgLayer, this.hud.root, this.banner, this.result, this.stats, this.errorBox]);
 
     this.dev = new DevPanel({
       onConfigChange: (c) => {
@@ -168,6 +204,15 @@ export class SandboxApp {
     this.status = startNow ? 'running' : 'ready';
     this.resultShown = false;
     this.result.classList.remove('show');
+    this.finishClock = -1;
+    this.bannerShown = false;
+    this.banner.className = 'finish-banner';
+    this.banner.textContent = '';
+    for (const d of this.dmgNums) {
+      d.life = 0;
+      d.el.classList.remove('show');
+    }
+    this.renderer.cinematic = this.config.presentation.cinematicFinishes;
     if (rerenderDev) this.dev.render(this.config, this.flags);
     this.updateButtons();
   }
@@ -225,6 +270,14 @@ export class SandboxApp {
     this.lastTime = now;
     if (dt > 0) this.fps += (1 / dt - this.fps) * 0.08;
 
+    // Finishing presentation: brief slow motion right after the decisive
+    // moment. Only the playback rate of the post-result aftermath changes;
+    // the result is already frozen.
+    if (this.finishClock >= 0) {
+      if (!this.runner.paused) this.finishClock += dt;
+      const slow = this.config.presentation.cinematicFinishes && this.finishClock < SLOWMO_TIME;
+      this.runner.speed = this.speed * (slow ? SLOWMO_FACTOR : 1);
+    }
     const t0 = performance.now();
     const alpha = this.runner.advance(dt);
     const t1 = performance.now();
@@ -232,7 +285,20 @@ export class SandboxApp {
 
     const events = this.battle.world.drainEvents();
     if (events.length) this.renderer.onCollisions(events, this.flags.contacts);
-    const effectDt = this.runner.paused ? 0 : dt * this.speed;
+    const dmg = this.battle.world.drainDamage();
+    if (dmg.length) {
+      this.renderer.onDamage(dmg);
+      if (this.config.presentation.damageNumbers) {
+        for (const ev of dmg) {
+          const bA = this.battle.world.bodies[ev.a]!;
+          const bB = this.battle.world.bodies[ev.b]!;
+          if (ev.damageToB >= DAMAGE_NUMBER_MIN) this.spawnDamageNumber(bB.x, bB.y, ev.damageToB, ev.b);
+          if (ev.damageToA >= DAMAGE_NUMBER_MIN) this.spawnDamageNumber(bA.x, bA.y, ev.damageToA, ev.a);
+        }
+      }
+    }
+    if (this.battle.phase === 'finished' && this.finishClock < 0) this.finishClock = 0;
+    const effectDt = this.runner.paused ? 0 : dt * this.runner.speed;
     this.renderer.render(alpha, effectDt, this.flags);
 
     this.hudTimer += dt;
@@ -241,9 +307,64 @@ export class SandboxApp {
       this.hud.update(this.battle);
       if (this.flags.fps || this.flags.physicsStats) this.renderStats();
     }
-    if (this.battle.phase === 'finished' && !this.resultShown) this.showResult();
+    this.updateDamageNumbers(this.runner.paused ? 0 : dt);
+    if (this.battle.phase === 'finished') {
+      const cinematic = this.config.presentation.cinematicFinishes;
+      if (!this.bannerShown && this.finishClock >= (cinematic ? BANNER_DELAY : 0)) this.showBanner();
+      if (!this.resultShown && this.finishClock >= (cinematic ? RESULT_DELAY_CINEMATIC : RESULT_DELAY_PLAIN)) this.showResult();
+    }
     requestAnimationFrame(this.frame);
   };
+
+  private spawnDamageNumber(x: number, y: number, dmg: number, target: number): void {
+    const d = this.dmgNums[this.dmgNext]!;
+    this.dmgNext = (this.dmgNext + 1) % this.dmgNums.length;
+    d.x = x;
+    d.y = y;
+    d.life = DAMAGE_NUMBER_LIFE;
+    const max = this.battle.world.bodies[target]!.combat.maxHealth;
+    d.el.textContent = `-${Math.round(dmg)}`;
+    d.el.classList.toggle('heavy', dmg / max >= 0.06);
+    d.el.classList.add('show');
+  }
+
+  private updateDamageNumbers(dt: number): void {
+    for (const d of this.dmgNums) {
+      if (d.life <= 0) continue;
+      d.life -= dt;
+      if (d.life <= 0) {
+        d.el.classList.remove('show');
+        continue;
+      }
+      const p = this.renderer.project(d.x, d.y, 0.04);
+      if (!p) continue;
+      const t = 1 - d.life / DAMAGE_NUMBER_LIFE;
+      // The overlay covers the stage; the canvas may be offset inside it (mobile HUD above).
+      const ox = this.canvas.offsetLeft;
+      const oy = this.canvas.offsetTop;
+      d.el.style.transform = `translate(${(p.x + ox).toFixed(1)}px, ${(p.y + oy - 18 - t * 34).toFixed(1)}px) translate(-50%, -50%)`;
+      d.el.style.opacity = String(Math.min(1, d.life / 0.3));
+    }
+  }
+
+  private showBanner(): void {
+    this.bannerShown = true;
+    const o = this.battle.result!.outcome;
+    let text: string;
+    let kind: string;
+    if (o.kind === 'win') {
+      text = FINISH_LABEL[o.finish];
+      kind = o.finish;
+    } else if (o.kind === 'draw') {
+      text = 'DRAW';
+      kind = 'draw';
+    } else {
+      text = 'TIME UP';
+      kind = 'timeout';
+    }
+    this.banner.textContent = text;
+    this.banner.className = `finish-banner show ${kind}${this.config.presentation.cinematicFinishes ? ' animated' : ''}`;
+  }
 
   private renderStats(): void {
     const lines: string[] = [];
@@ -267,23 +388,44 @@ export class SandboxApp {
     this.resultShown = true;
     this.status = 'finished';
     this.updateButtons();
+    this.banner.classList.add('dim');
     const r = this.battle.result!;
     const defs = [getTop(this.config.player.topId), getTop(this.config.opponent.topId)];
-    const label = (i: number) => {
-      const mirror = defs[0]!.id === defs[1]!.id;
-      return mirror ? `${defs[i]!.name} (${i === 0 ? 'P1' : 'P2'})` : defs[i]!.name;
-    };
+    const mirror = defs[0]!.id === defs[1]!.id;
+    const label = (i: number) => (mirror ? `${defs[i]!.name} (${i === 0 ? 'P1' : 'P2'})` : defs[i]!.name);
     const o = r.outcome;
+    const finishText: Record<FinishKind, (l: string) => string> = {
+      burst: (l) => `${l} burst apart`,
+      knockout: (l) => `${l} was knocked out of the stadium`,
+      spin: (l) => `${l} stopped spinning`,
+    };
     if (o.kind === 'win') {
-      this.resultText.textContent = `${label(o.winner)} wins`;
-      this.resultSub.textContent = `${label(o.loser)} stopped spinning at ${r.time.toFixed(1)} s · seed ${this.config.seed}`;
+      this.resultText.textContent = `${label(o.winner)} wins!`;
+      this.resultText.style.color = hex(defs[o.winner]!.palette.accent);
+      this.resultSub.textContent = `${FINISH_LABEL[o.finish]} · ${finishText[o.finish](label(o.loser))} · ${r.time.toFixed(1)} s`;
     } else if (o.kind === 'draw') {
       this.resultText.textContent = 'Draw';
-      this.resultSub.textContent = `Both tops stopped on the same physics step at ${r.time.toFixed(1)} s`;
+      this.resultText.style.color = '';
+      this.resultSub.textContent = `Both tops were eliminated on the same physics step (${o.finishes.map((f) => FINISH_LABEL[f].toLowerCase()).join(' + ')}) · ${r.time.toFixed(1)} s`;
     } else {
-      this.resultText.textContent = 'Timeout';
-      this.resultSub.textContent = `Both tops still spinning after ${r.time.toFixed(0)} s (maximum duration)`;
+      this.resultText.textContent = 'Time up';
+      this.resultText.style.color = '';
+      this.resultSub.textContent = `Both tops still in play after ${r.time.toFixed(0)} s (maximum duration). No winner.`;
     }
+    const row = (k: string, f: (i: number) => string) =>
+      [el('span', { class: 'rk', text: k }), el('span', { text: f(0) }), el('span', { text: f(1) })];
+    const head = [el('span'), ...[0, 1].map((i) => el('span', { class: 'rh', text: label(i), style: `color:${hex(defs[i]!.palette.accent)}` }))];
+    const strongest = r.strongestHit.by >= 0 ? `${r.strongestHit.damage.toFixed(0)} by ${label(r.strongestHit.by)}` : 'none';
+    this.resultTable.replaceChildren(
+      el('div', { class: 'rgrid' }, [
+        ...head,
+        ...row('Health left', (i) => `${Math.ceil(r.tops[i]!.health)} / ${Math.round(r.tops[i]!.maxHealth)}`),
+        ...row('Stamina left', (i) => `${(r.tops[i]!.stamina * 100).toFixed(0)}%`),
+        ...row('Damage dealt', (i) => r.tops[i]!.damageDealt.toFixed(0)),
+        ...row('Hits landed', (i) => String(r.tops[i]!.hitsLanded)),
+      ]),
+      el('div', { class: 'rmeta' }, [`Strongest hit: ${strongest}`, el('br'), `Duration ${r.time.toFixed(1)} s · seed ${r.seed}`]),
+    );
     this.result.classList.add('show');
   }
 

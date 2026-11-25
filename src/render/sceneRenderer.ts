@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import type { World } from '../sim/world';
 import type { CollisionEvent } from '../sim/collision';
+import type { DamageEvent } from '../sim/combat';
+import { FinishFx } from './finishFx';
 import type { TopDefinition } from '../content/tops';
 import { WORLD_SCALE } from './coords';
 import { buildStadium } from './stadiumMesh';
@@ -37,6 +39,13 @@ export class SceneRenderer {
   private readonly q = new THREE.Quaternion();
   private readonly axis = new THREE.Vector3();
   private readonly grad = { x: 0, y: 0 };
+  readonly fx = new FinishFx(S);
+  /** Finish presentation already started, per top index. */
+  private finishStarted: boolean[] = [];
+  /** Flash and camera shake on finishes (developer toggle). */
+  cinematic = true;
+  private readonly camBase = new THREE.Vector3();
+  private readonly projV = new THREE.Vector3();
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -75,7 +84,7 @@ export class SceneRenderer {
     rim.position.set(3, 2.5, -3);
     this.scene.add(rim);
 
-    this.scene.add(this.sparks.points, this.rings.group, this.debug.group);
+    this.scene.add(this.sparks.points, this.rings.group, this.debug.group, this.fx.group);
   }
 
   /** Attach a new world (on battle start/reset). Rebuilds top models. */
@@ -90,6 +99,8 @@ export class SceneRenderer {
       this.scene.add(this.stadiumGroup);
       this.stadiumRef = world.stadium;
     }
+    // Debris parts reference model geometry: clear them before disposing models.
+    this.fx.clear();
     for (const m of this.models) {
       this.scene.remove(m.root);
       m.dispose();
@@ -102,6 +113,7 @@ export class SceneRenderer {
     this.trails = defs.map((d) => new Trail(d.palette.accent, 48, 0.09, 0.32, 0.02));
     for (const m of this.models) this.scene.add(m.root);
     for (const t of this.trails) this.scene.add(t.mesh);
+    this.finishStarted = defs.map(() => false);
     this.sparks.clear();
     this.rings.clear();
     this.debug.setWorld(world, defs.map((d) => d.palette.accent));
@@ -122,12 +134,80 @@ export class SceneRenderer {
     }
   }
 
+  /**
+   * Extra feedback for damaging impacts: sparks and an impact ring scaled
+   * by damage relative to the target's maximum health.
+   */
+  onDamage(events: DamageEvent[]): void {
+    const w = this.world;
+    if (!w) return;
+    for (const ev of events) {
+      const bA = w.bodies[ev.a]!;
+      const bB = w.bodies[ev.b]!;
+      const rel = Math.max(ev.damageToA / bA.combat.maxHealth, ev.damageToB / bB.combat.maxHealth);
+      // ~6 % of max health in one hit reads as a heavy hit.
+      const intensity = Math.min(1, rel / 0.06);
+      if (intensity < 0.15) continue;
+      const y = (w.stadium.height(ev.x, ev.y) + 0.018) * S;
+      this.sparks.emit(ev.x * S, y, -ev.y * S, ev.nx, -ev.ny, intensity);
+      this.rings.emit(ev.x * S, y - 0.1, -ev.y * S, 0.4 + 0.6 * intensity);
+    }
+  }
+
+  /** Projects a simulation-plane point (metres) to canvas CSS pixels, or null if behind the camera. */
+  project(x: number, y: number, lift = 0.05): { x: number; y: number } | null {
+    const w = this.world;
+    if (!w) return null;
+    this.projV.set(x * S, (w.stadium.height(x, y) + lift) * S, -y * S).project(this.camera);
+    if (this.projV.z > 1) return null;
+    const el = this.renderer.domElement;
+    return { x: ((this.projV.x + 1) / 2) * el.clientWidth, y: ((1 - this.projV.y) / 2) * el.clientHeight };
+  }
+
+  /** Starts the burst / knockout presentation for a top that left play. */
+  private startFinish(i: number): void {
+    const w = this.world!;
+    const b = w.bodies[i]!;
+    const m = this.models[i]!;
+    this.finishStarted[i] = true;
+    this.trails[i]?.reset();
+    if (this.trails[i]) this.trails[i]!.mesh.visible = false;
+    const h = w.stadium.height(b.x, b.y);
+    m.root.position.set(b.x * S, h * S, -b.y * S);
+    if (b.eliminated === 'burst') {
+      const power = Math.min(1, b.finishIntensity / Math.max(1, b.combat.maxHealth * 0.08));
+      const y = (h + 0.018) * S;
+      for (let k = 0; k < 3; k++) this.sparks.emit(b.x * S, y, -b.y * S, b.finishDirX, -b.finishDirY, 1);
+      this.rings.emit(b.x * S, y - 0.1, -b.y * S, 1);
+      if (this.cinematic) {
+        this.fx.flashAt(b.x * S, y, -b.y * S, 0.6 + 0.4 * power);
+        this.fx.shakeCamera(0.035);
+      }
+      this.fx.burst(m, b.finishDirX, -b.finishDirY, 0.4 + 0.6 * power, b.vx * S * 0.5, -b.vy * S * 0.5);
+    } else if (b.eliminated === 'knockout') {
+      const out = Math.max(Math.hypot(b.vx, b.vy), 0.6) * S;
+      const up = Math.max(b.finishIntensity, 0.45) * S * 0.9;
+      const y = (h + 0.02) * S;
+      this.sparks.emit(b.x * S, y, -b.y * S, b.finishDirX, -b.finishDirY, 1);
+      if (this.cinematic) {
+        this.fx.flashAt(b.x * S, y, -b.y * S, 0.5);
+        this.fx.shakeCamera(0.025);
+      }
+      this.fx.knockout(m, b.finishDirX * out, up, -b.finishDirY * out);
+    }
+  }
+
   render(alpha: number, dt: number, flags: DebugFlags): void {
     const w = this.world;
     if (w) {
       w.bodies.forEach((b, i) => {
         const m = this.models[i];
         if (!m) return;
+        if (b.eliminated !== null) {
+          // Burst / knocked-out tops are animated by the finish presentation.
+          if (!this.finishStarted[i]) this.startFinish(i);
+          return;
+        }
         const x = b.px + (b.x - b.px) * alpha;
         const y = b.py + (b.y - b.py) * alpha;
         const h = w.stadium.height(x, y);
@@ -152,6 +232,15 @@ export class SceneRenderer {
     }
     this.sparks.update(dt);
     this.rings.update(dt);
+    const stadium = w?.stadium;
+    const R = (stadium?.boundingRadius ?? 0.2) * S;
+    this.fx.update(
+      dt,
+      (x, z) => (stadium ? stadium.height(x / S, -z / S) * S : 0),
+      R,
+      -0.45,
+    );
+    this.camera.position.copy(this.camBase).add(this.fx.shake);
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -183,6 +272,7 @@ export class SceneRenderer {
     const dH = R / Math.tan(hFov / 2) + R * Math.cos(CAMERA_ELEVATION) * 0.5;
     const d = Math.max(dV, dH) * 1.04;
     this.camera.position.set(0, Math.sin(CAMERA_ELEVATION) * d, Math.cos(CAMERA_ELEVATION) * d);
+    this.camBase.copy(this.camera.position);
     this.camera.lookAt(0, -0.05, 0);
     this.camera.far = d * 3;
     this.camera.updateProjectionMatrix();
@@ -194,6 +284,7 @@ export class SceneRenderer {
     this.sparks.dispose();
     this.rings.dispose();
     this.debug.dispose();
+    this.fx.dispose();
     if (this.stadiumGroup) disposeObject(this.stadiumGroup);
     disposeMaterialCache();
     this.envTex.dispose();
