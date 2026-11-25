@@ -2,6 +2,74 @@
 
 All notable changes to SpinStrike are documented here.
 
+## [0.2.0] — 2026-11-25 · Combat & Finishes
+
+### Added
+- **Health and combat stats.**
+  - `deriveTopCombat()` maps the stats to combat values: max health = 10 × health stat, plus attack and defense.
+  - Health is independent of stamina (rotational energy) and resets every battle.
+- **Physics-based collision damage** (`src/sim/combat.ts`):
+  - Damage depends on normal impact speed, reduced mass, the attacker's ring strike × spin, attack (linear) and defense (bounded K/(K + e·def)).
+  - A severity exponent and a soft cap keep hits bounded.
+  - There is no randomness and there are no class multipliers.
+  - The formula is documented in the README.
+- **Contact lifecycle:** one damaging impact per contact. A contact re-arms after a 1 mm separation, or after 80 ms for a hard re-approach during an unbroken contact.
+- **Three finish types:**
+  - **Burst** (health 0).
+  - **Knockout:** a 2.5D rim-escape check at wall impacts, using outward speed × rim slope plus impact lift J/m against lip height × stability.
+  - **Spin** (existing toppling).
+
+  Both tops are evaluated after each full step. Simultaneous eliminations are draws. A top meeting several conditions on one step is classified burst > knockout > spin. The result is frozen, and combat is disabled after it.
+- **Cinematic finishing presentation** (`src/render/finishFx.ts`):
+  - Brief slow motion of the aftermath, an impact flash and a light camera shake.
+  - The burst splits the model into its core, ring, disc and tip, which tumble and settle.
+  - A knocked-out top flies over the rim and drops beside the stadium.
+  - The banner reads BURST / KNOCKOUT / SPIN FINISH.
+  - A developer toggle turns it off.
+  - Reset and restart clear all debris and effects.
+- **Combat feedback:** sparks and impact rings scaled by damage, plus optional floating damage numbers (pooled, off by default).
+- **Combat HUD:** green health bar (current/max) and amber stamina bar (%), with icons and numbers, plus hits landed and damage dealt and taken. Speed and spin collapse behind a "details" button in phone portrait.
+- **Result card:** winner, defeated top, finish type, duration, health and stamina left, damage dealt and hits for both tops, the strongest single hit, and the seed.
+- **Developer panel:**
+  - Combat section with all formula, contact and knockout parameters.
+  - Knockout switch.
+  - Presentation toggles: cinematic finishes and damage numbers.
+  - Per-top max health, attack and defense.
+  - Rim lip height.
+  - Combat spin-drain weight.
+- **Configuration format v2.** v0.1 files (version 1) are migrated on import: all values are kept, new values take their defaults, and the migration notes are shown. Invalid values are still rejected.
+- **Headless combat simulator** (`npm run sim`):
+  - Defaults to 500 seeds per ordered matchup (8,000 battles).
+  - Reports the 4×4 matrix (by slot and slot-averaged), per-top aggregates, finish-type rates, duration mean, median and percentiles, the winner's remaining health and stamina, damage, collisions, max hit and failures.
+  - Supports `--set` overrides and Markdown or JSON output.
+- **Balance report** and saved runs in `docs/balance/`.
+- **Tests:** 44 new tests, 104 in total (all 60 v0.1 tests unchanged). They cover:
+  - health init, reset and clamping
+  - attack and defense scaling and bounded defense
+  - high vs low and glancing vs direct impacts
+  - symmetric and asymmetric damage
+  - repeated-contact prevention and legitimate re-hits
+  - burst, spin and knockout detection
+  - ordinary rim contact and overlap without a knockout
+  - draws and deterministic classification
+  - slot fairness, timeout and result immutability
+  - seeded reproducibility
+  - v2 validation and v0.1 migration
+  - invalid numerical inputs
+  - presentation lifecycle and cleanup
+  - a v0.1 step-exact regression
+
+### Changed
+- `resolveTopPair()` also fills an optional `ContactReport`. The impulse maths is unchanged.
+- The v0.1 attack/defense spin drain is now weighted by `collision.statSpinDrainWeight` (default 0.5; 1 = v0.1). With damage off and the weight at 1, v0.2 reproduces v0.1 battles step for step (`tests/regression.test.ts`).
+- `BattleOutcome`: a win carries `finish: 'burst' | 'knockout' | 'spin'`, and a draw carries `finishes`. This replaces v0.1's `reason: 'spin-out'`. `BattleResult` also holds frozen per-top statistics, the strongest hit and the seed.
+- Procedural top models now group their meshes into four part groups (core, ring, disc, tip). The appearance is unchanged.
+- No v0.1 test needed modification.
+
+### Known limitations
+- Balance misses the provisional targets: Titan is overpowered (100 % vs Inferno and Phantom) and Inferno is underpowered (it wins only against Tempest). See `docs/balance/BALANCE_REPORT.md`.
+- Real-device performance of v0.2 has not been verified.
+
 ## [0.1.0] — 2026-11-25 · Physics Sandbox
 
 ### Added

@@ -3,8 +3,21 @@ import type { TopPhysicsParams } from './topParams';
 import type { StadiumSurface } from './stadium/types';
 import { Rng } from './rng';
 import { integrateFree, guardBody } from './dynamics';
-import { resolveTopPair, resolveWall, type CollisionEvent, type CollisionParams, type ContactState } from './collision';
+import { resolveTopPair, resolveWall, wallImpact, type CollisionEvent, type CollisionParams, type ContactState } from './collision';
 import { LIMITS } from './units';
+import {
+  DEFAULT_COMBAT,
+  applyContactDamage,
+  makeContactReport,
+  makePairState,
+  rimEscape,
+  updatePairArming,
+  type CombatParams,
+  type ContactReport,
+  type DamageEvent,
+  type PairCombatState,
+  type TopCombatStats,
+} from './combat';
 
 export interface LaunchParams {
   /** Launch distance from the centre as a fraction of stadium radius. */
@@ -31,6 +44,10 @@ export interface WorldOptions {
   launch: LaunchParams;
   seed: number;
   stepHz: number;
+  /** Combat parameters (v0.2). Defaults to DEFAULT_COMBAT. */
+  combat?: CombatParams;
+  /** Per-top combat stats, same order as `tops`. Defaults to DEFAULT_TOP_COMBAT. */
+  topCombat?: readonly TopCombatStats[];
 }
 
 export interface StepStats {
@@ -43,6 +60,7 @@ export interface StepStats {
 }
 
 const MAX_PENDING_EVENTS = 64;
+const MAX_PENDING_DAMAGE = 32;
 
 /**
  * The physics world: owns top bodies and advances them in fixed steps.
@@ -54,21 +72,35 @@ export class World {
   readonly dt: number;
   readonly seed: number;
   readonly collision: CollisionParams;
+  readonly combatParams: CombatParams;
+  readonly stepHz: number;
+  /** When false, no damage or knockouts are applied (set once a battle is decided). */
+  combatEnabled = true;
   steps = 0;
   readonly stats: StepStats = { steps: 0, substepsLast: 0, substepsTotal: 0, maxSubsteps: 0, pendingEvents: 0 };
   /** Collision events since last `drainEvents()` (bounded). */
   private pending: CollisionEvent[] = [];
   private readonly contacts: ContactState[] = [];
+  private readonly pairCombat: PairCombatState[] = [];
+  private readonly report: ContactReport = makeContactReport();
+  private readonly damageScratch: DamageEvent = { step: 0, x: 0, y: 0, nx: 0, ny: 0, a: 0, b: 0, damageToA: 0, damageToB: 0, normalSpeed: 0 };
+  private pendingDamage: DamageEvent[] = [];
   private readonly minRadius: number;
+  private readonly slopeOut = { x: 0, y: 0 };
 
   constructor(opts: WorldOptions) {
     this.stadium = opts.stadium;
     this.dt = 1 / opts.stepHz;
     this.seed = opts.seed >>> 0;
     this.collision = opts.collision;
-    this.bodies = opts.tops.map((p, i) => new TopBody(i, p));
+    this.combatParams = opts.combat ?? DEFAULT_COMBAT;
+    this.stepHz = opts.stepHz;
+    this.bodies = opts.tops.map((p, i) => new TopBody(i, p, opts.topCombat?.[i]));
     for (let i = 0; i < this.bodies.length; i++) {
-      for (let j = i + 1; j < this.bodies.length; j++) this.contacts.push({ touching: false });
+      for (let j = i + 1; j < this.bodies.length; j++) {
+        this.contacts.push({ touching: false });
+        this.pairCombat.push(makePairState());
+      }
     }
     this.minRadius = Math.min(...this.bodies.map((b) => b.params.radius));
     this.launch(opts.launch);
@@ -120,23 +152,59 @@ export class World {
     const n = Math.min(LIMITS.maxSubsteps, Math.max(1, Math.ceil(maxDisp / (0.25 * this.minRadius))));
     const h = this.dt / n;
 
+    const cp = this.combatParams;
+    const w = this.collision.statSpinDrainWeight;
     for (let s = 0; s < n; s++) {
-      for (const b of bodies) integrateFree(b, this.stadium, h);
+      for (const b of bodies) if (b.eliminated === null) integrateFree(b, this.stadium, h);
       let c = 0;
       for (let i = 0; i < bodies.length; i++) {
         for (let j = i + 1; j < bodies.length; j++) {
-          const ev = resolveTopPair(bodies[i]!, bodies[j]!, this.collision, this.contacts[c++]!, this.steps);
+          const A = bodies[i]!;
+          const B = bodies[j]!;
+          const contact = this.contacts[c]!;
+          const pair = this.pairCombat[c++]!;
+          // Burst / knocked-out tops have left play: no further contact.
+          if (A.eliminated !== null || B.eliminated !== null) continue;
+          const ev = resolveTopPair(A, B, this.collision, contact, this.steps, this.report);
           if (ev) this.pushEvent(ev);
+          if (this.combatEnabled) {
+            if (applyContactDamage(A, B, this.report, pair, cp, this.steps, this.stepHz, this.damageScratch)) {
+              this.pushDamage({ ...this.damageScratch });
+            }
+            updatePairArming(A, B, pair, cp);
+          }
         }
       }
       for (const b of bodies) {
-        const ev = resolveWall(b, this.stadium, this.steps);
+        if (b.eliminated !== null) continue;
+        const ev = resolveWall(b, this.stadium, this.steps, w);
         if (ev) this.pushEvent(ev);
+        if (this.combatEnabled && wallImpact.vn > 0) {
+          this.stadium.gradient(b.x, b.y, this.slopeOut);
+          const slope = Math.sqrt(this.slopeOut.x * this.slopeOut.x + this.slopeOut.y * this.slopeOut.y);
+          const vUp = rimEscape(b, wallImpact.vn, slope, this.stadium.wallHeight, this.steps, this.stepHz, cp);
+          if (vUp > 0) {
+            b.eliminated = 'knockout';
+            b.eliminatedStep = this.steps + 1;
+            b.finishIntensity = vUp;
+            b.finishDirX = wallImpact.nx;
+            b.finishDirY = wallImpact.ny;
+            // Exit velocity for the presentation: outward speed restored.
+            b.vx = wallImpact.nx * wallImpact.vn;
+            b.vy = wallImpact.ny * wallImpact.vn;
+          }
+        }
       }
     }
 
     this.steps++;
     for (const b of bodies) {
+      if (b.eliminated !== null) {
+        // Out of play: frozen for the simulation (the presentation animates it).
+        b.px = b.x;
+        b.py = b.y;
+        continue;
+      }
       guardBody(b, this.stadium);
       const sp = b.speed;
       if (sp > b.maxSpeed) b.maxSpeed = sp;
@@ -159,6 +227,18 @@ export class World {
   private pushEvent(ev: CollisionEvent): void {
     if (this.pending.length >= MAX_PENDING_EVENTS) this.pending.shift();
     this.pending.push(ev);
+  }
+
+  private pushDamage(ev: DamageEvent): void {
+    if (this.pendingDamage.length >= MAX_PENDING_DAMAGE) this.pendingDamage.shift();
+    this.pendingDamage.push(ev);
+  }
+
+  /** Returns and clears pending damage events (for effects / damage numbers). */
+  drainDamage(): DamageEvent[] {
+    const out = this.pendingDamage;
+    this.pendingDamage = [];
+    return out;
   }
 
   /** Returns and clears pending collision events (for effects/debug). */

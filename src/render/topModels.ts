@@ -23,6 +23,11 @@ export interface TopModel {
   spin: THREE.Group;
   /** Height of the model's centre above its tip, scene units. */
   centreHeight: number;
+  /**
+   * The four separately built components (children of `spin`). A burst
+   * finish detaches them and animates them as debris.
+   */
+  parts: { core: THREE.Group; ring: THREE.Group; disc: THREE.Group; tip: THREE.Group };
   dispose(): void;
 }
 
@@ -63,24 +68,30 @@ export function buildTopModel(def: TopDefinition): TopModel {
   tilt.add(spin);
 
   const geos: THREE.BufferGeometry[] = [];
-  const add = (mesh: THREE.Mesh) => {
+  const groups = { tip: new THREE.Group(), disc: new THREE.Group(), ring: new THREE.Group(), core: new THREE.Group() };
+  const add = (g: THREE.Group, mesh: THREE.Mesh) => {
     mesh.castShadow = true;
     mesh.receiveShadow = false;
     geos.push(mesh.geometry);
-    spin.add(mesh);
+    g.add(mesh);
     return mesh;
   };
 
-  for (const m of buildTip(parts.tip, def)) add(m);
-  for (const m of buildDisc(parts.disc, def)) add(m);
-  for (const m of buildRing(parts.ring, def)) add(m);
-  for (const m of buildCore(parts.core, def)) add(m);
+  for (const m of buildTip(parts.tip, def)) add(groups.tip, m);
+  for (const m of buildDisc(parts.disc, def)) add(groups.disc, m);
+  for (const m of buildRing(parts.ring, def)) add(groups.ring, m);
+  for (const m of buildCore(parts.core, def)) add(groups.core, m);
+  for (const [k, g] of Object.entries(groups)) {
+    g.name = `${def.id}-${k}`;
+    spin.add(g);
+  }
 
   return {
     root,
     tilt,
     spin,
     centreHeight: 0.016 * S,
+    parts: groups,
     dispose() {
       for (const g of geos) g.dispose();
     },

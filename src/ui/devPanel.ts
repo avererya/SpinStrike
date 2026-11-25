@@ -1,6 +1,6 @@
 import { STARTER_TOPS, getTop } from '../content/tops';
-import { COLLISION_PARAMS, SIM_LIMITS, STADIUM_PARAMS, TOP_PARAMS, type ParamSpec } from '../config/params';
-import { defaultConfig, resolveTopParams, type SandboxConfig } from '../config/sandboxConfig';
+import { COLLISION_PARAMS, COMBAT_PARAMS, SIM_LIMITS, STADIUM_PARAMS, TOP_COMBAT_PARAMS, TOP_PARAMS, type ParamSpec } from '../config/params';
+import { defaultConfig, resolveTopCombat, resolveTopParams, type SandboxConfig } from '../config/sandboxConfig';
 import { parseConfigJson } from '../config/validate';
 import type { DebugFlags } from '../render/debugDraw';
 import { el } from './dom';
@@ -71,6 +71,28 @@ export class DevPanel {
       this.section('Collisions', COLLISION_PARAMS.map((s) => this.slider(s, config.collision[s.key], (v) => (config.collision[s.key] = v)))),
     );
     b.append(
+      this.section('Combat · damage, contacts & knockouts', [
+        el('p', { class: 'dev-note', text: 'damage = G · (attack/attack_ref) · K/(K + e·defense) · softcap((E/E_ref)^p). E = ½·μ·vₙ·(k_imp·vₙ + k_rot·ring strike·|ω|·r).' }),
+        ...COMBAT_PARAMS.map((s) => this.slider(s, config.combat[s.key], (v) => (config.combat[s.key] = v))),
+        this.checkbox('Knockouts (rim escape)', config.combat.knockouts, (v) => {
+          config.combat.knockouts = v;
+          this.commit();
+        }),
+      ]),
+    );
+    b.append(
+      this.section('Presentation', [
+        this.checkbox('Cinematic finishes (slow motion, flash, shake)', config.presentation.cinematicFinishes, (v) => {
+          config.presentation.cinematicFinishes = v;
+          this.commit();
+        }),
+        this.checkbox('Floating damage numbers', config.presentation.damageNumbers, (v) => {
+          config.presentation.damageNumbers = v;
+          this.commit();
+        }),
+      ]),
+    );
+    b.append(
       this.section('Battle', [
         this.slider(
           { key: 'maxDuration', label: 'Maximum duration', min: SIM_LIMITS.maxDuration.min, max: SIM_LIMITS.maxDuration.max, step: 5, unit: 's', help: 'Timeout if both tops are still spinning.' },
@@ -82,12 +104,20 @@ export class DevPanel {
     for (const side of ['player', 'opponent'] as const) {
       const slot = config[side];
       const eff = resolveTopParams(slot);
+      const effC = resolveTopCombat(slot);
       const def = getTop(slot.topId);
-      const rows = TOP_PARAMS.map((s) => {
-        const row = this.slider(s, eff[s.key], (v) => (slot.overrides[s.key] = v));
-        if (slot.overrides[s.key] !== undefined) row.classList.add('overridden');
-        return row;
-      });
+      const rows = [
+        ...TOP_COMBAT_PARAMS.map((s) => {
+          const row = this.slider(s, effC[s.key], (v) => (slot.overrides[s.key] = v));
+          if (slot.overrides[s.key] !== undefined) row.classList.add('overridden');
+          return row;
+        }),
+        ...TOP_PARAMS.map((s) => {
+          const row = this.slider(s, eff[s.key], (v) => (slot.overrides[s.key] = v));
+          if (slot.overrides[s.key] !== undefined) row.classList.add('overridden');
+          return row;
+        }),
+      ];
       const resetTop = el('button', { class: 'btn small', text: `Reset ${def.name} to defaults` });
       resetTop.addEventListener('click', () => {
         slot.overrides = {};
@@ -159,6 +189,13 @@ export class DevPanel {
     ]);
   }
 
+  private checkbox(label: string, value: boolean, set: (v: boolean) => void): HTMLElement {
+    const cb = el('input', { type: 'checkbox' });
+    cb.checked = value;
+    cb.addEventListener('change', () => set(cb.checked));
+    return el('label', { class: 'toggle' }, [cb, label]);
+  }
+
   private debugToggles(): HTMLElement[] {
     return (Object.keys(DEBUG_LABELS) as (keyof DebugFlags)[]).map((k) => {
       const cb = el('input', { type: 'checkbox' });
@@ -198,7 +235,13 @@ export class DevPanel {
     }
     this.config = res.config;
     this.commit();
-    this.flash('Configuration imported.');
+    if (res.notes.length) {
+      this.messages.className = 'dev-msg ok';
+      this.messages.replaceChildren(
+        el('strong', { text: 'Configuration imported.' }),
+        el('ul', {}, res.notes.map((n) => el('li', { text: n }))),
+      );
+    } else this.flash('Configuration imported.');
   }
 
   private flash(msg: string): void {

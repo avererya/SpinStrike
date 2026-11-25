@@ -21,7 +21,11 @@ This document records the long-term vision and the design decisions made so far.
 - 1v1 battles, with 2v2 team battles later.
 - Manually activated special abilities (future).
 - Evenly matched battles should generally last 30–60 s. Much stronger tops should be able to win in 10–15 s.
-- Three eventual victory conditions: **stamina depletion**, **health depletion (burst)** and **stadium knockout**.
+- Three victory conditions: **spin finish** (stamina depletion), **burst finish** (health depletion) and **knockout finish** (leaving the stadium). All three exist from v0.2.
+- Top strength, equipment and build quality matter more than player reflexes.
+- Players will eventually choose one of four starter tops. More tops are collectible and upgradeable.
+- Interchangeable battle rings, competitive ranks, multiple stadium shapes and 2v2 team battles are planned.
+- Timing-based launches and manually activated signature abilities come later.
 - All tops, artwork, names and branding are original. No copyrighted assets or official branding from existing franchises.
 
 ## Starter tops
@@ -38,9 +42,86 @@ This document records the long-term vision and the design decisions made so far.
 - Part names (Rush Flat, Bastion Ball, Needle Point, Vector Semi-Flat; Blaze Fang, Aegis Wall, Zephyr Halo, Eclipse Wing; disc and core names) are **[Implementation assumption]**: original placeholder names.
 - All starter tops spin right (clockwise from above). **[Implementation assumption]**
 
-## v0.1 scope [Confirmed]
+## v0.1 scope [Confirmed, delivered]
 
-A physics sandbox with two tops in the Classic Bowl, a developer interface, and a stamina-only result (win, draw when both stop on the same step, timeout at the maximum duration). Everything else (career, economy, abilities, launch minigame, health/burst, knockout, extra stadiums) is out of scope.
+A physics sandbox with two tops in the Classic Bowl, a developer interface, and a stamina-only result (win, draw when both stop on the same step, timeout at the maximum duration). The owner approved its movement, visuals, collision frequency and mobile performance after playtesting on an iPhone.
+
+## v0.2 scope [Confirmed, delivered]
+
+v0.2 is a combat sandbox. It adds:
+- Independent health and stamina.
+- Attack and defense that act through physics-based collision damage.
+- Burst, knockout and improved spin finishes, each with a short cinematic presentation.
+- A combat HUD and an expanded result card.
+- Combat developer controls, with v0.1 configuration import.
+- A headless balance simulator.
+
+Permanent progression and everything in "Out of scope" in the README are excluded.
+
+## Combat design (v0.2)
+
+- **Health ≠ stamina.** [Confirmed]
+  - Health is structural integrity. It is lost only through damaging collisions, and 0 health means a burst. It resets every battle, with no repairs or permanent damage.
+  - Stamina is the existing rotational energy, and running out means a spin finish.
+  - Health loss does not affect movement, attack or stability in v0.2, to avoid death spirals. [Confirmed]
+- **Health scale:** max health = 10 × health stat. [Implementation assumption]
+- **Damage emerges from physics.** [Confirmed principle] It depends on approach speed along the normal, reduced mass, the attacker's ring strike × spin, attack (linear) and defense (K/(K + e·def), never zero). There are no random critical hits and no class multipliers. The exact formula is in the README. The constants are **[Provisional]** tuning.
+- **Contact lifecycle:**
+  - One damaging impact per contact.
+  - A contact re-arms after 1 mm of separation.
+  - A hard re-approach during an unbroken contact counts after 80 ms.
+
+  [Implementation assumption]
+- **Combat spin drain:** v0.1's attack/defense spin-drain modifiers are kept but weighted at 0.5, so offense is not counted twice. [Provisional]
+- **Knockouts** use a bounded 2.5D rim-escape estimate at wall impacts. Outward speed along the rim slope plus impact-induced lift (Δv = J/m) must clear the lip height, raised by stability. Knockouts are rare in the Classic Bowl by design (about 1 %). [Implementation assumption; rarity Confirmed]
+- **Finish rules:** [Implementation assumption, consistent with spec]
+  - Both tops are evaluated after the whole step.
+  - Both eliminated on the same step is a draw.
+  - One top meeting several conditions is classified burst > knockout > spin.
+  - The result is frozen once decided.
+  - The maximum duration gives a timeout with no winner.
+- **Finishing presentation** is 1–2 s, separate from the simulation, and can be switched off in the developer panel. A burst separates the core, ring, disc and tip. [Confirmed direction; details are implementation assumptions]
+
+## Soft counter system [Confirmed]
+
+- Attack counters Stamina: Inferno should be able to destroy Tempest before endurance decides.
+- Stamina counters Defense: Tempest should outlast Titan.
+- Defense counters Attack: Titan should survive Inferno until Inferno exhausts itself.
+- Balance: Phantom should be competitive with everyone.
+- The balance must emerge from stats, physics and formulas. There are no hidden multipliers, forced outcomes or rubber-banding.
+- A sufficiently upgraded top should be able to beat its natural counter.
+
+**Provisional target win rates** (row beats column, equal upgrades, Classic Bowl):
+
+| | Inferno | Titan | Tempest | Phantom |
+| --- | --- | --- | --- | --- |
+| Inferno | 50 % | 35 % | 65 % | 50 % |
+| Titan | 65 % | 50 % | 35 % | 50 % |
+| Tempest | 35 % | 65 % | 50 % | 50 % |
+| Phantom | 50 % | 50 % | 50 % | 50 % |
+
+**Provisional duration targets:**
+
+| Matchup type | Target |
+| --- | --- |
+| Overwhelming advantage | 5–15 s |
+| Significant advantage | 15–30 s |
+| Evenly matched | 30–60 s |
+| Defensive matchup | 45–75 s |
+| Stamina-heavy matchup | 60–90 s |
+
+**Status after v0.2:** the counter cycle emerges in the right direction, but the magnitudes are too extreme. Titan is overpowered and Inferno underpowered; see `docs/balance/BALANCE_REPORT.md`.
+
+## Future signature abilities [Provisional concepts only: not implemented]
+
+| Top | Ability | Concept |
+| --- | --- | --- |
+| Inferno | Hellfire Strike | Converts rotational energy into a powerful offensive attack |
+| Titan | Iron Fortress | Temporarily increases defense and stability |
+| Tempest | Eternal Cyclone | Temporarily reduces stamina consumption |
+| Phantom | Phantom Rush | Temporarily increases movement and striking power |
+
+Activating a signature ability and then landing a burst finish should eventually be an especially satisfying moment. The names, activation conditions and numbers are undecided. In the architecture, abilities would temporarily modify `TopPhysicsParams` / `TopCombatStats` and could trigger the existing finish presentation.
 
 ## Physics and design decisions
 
@@ -58,7 +139,8 @@ A physics sandbox with two tops in the Classic Bowl, a developer interface, and 
   - stamina → passive decay ×2.0–0.75
   - defense → stability 0.25–0.9, restitution factor ×1.2–0.75, impact spin resistance 0–0.6
   - attack → contact friction 0.15–0.55 × ring factor, blade strike ×0.6–1.4, impact spin drain ×0.5–1.6
-  - health → unused in v0.1
+  - health → max health = 10 × stat (v0.2)
+  - attack and defense also enter the damage formula directly (v0.2)
 - Classic Bowl: 0.20 m radius, 0.03 m depth, raised rim from 82 % of the radius rising a further 0.018 m. **[Provisional]**
 - Launch: tops start opposite each other at 62 % of the radius, travelling around the bowl in their natural drive direction angled 0.35 rad inward, with ±0.25 rad and ±4 % seeded spread. **[Implementation assumption]** The launch-timing minigame will later modify launch energy.
 
@@ -70,7 +152,18 @@ A physics sandbox with two tops in the Classic Bowl, a developer interface, and 
 
 ## Open questions for design
 
-1. Should Attack tops be able to win by stamina at all in the final game, or rely on burst/knockout?
-2. Is there a target spin-down time for a lone top of each class? These times anchor every other tuning value.
-3. Should left-spin tops exist? The physics already supports `spinDirection = −1`, and opposite-spin contacts behave differently.
-4. What is the intended size ratio between stadium and top? The Classic Bowl is currently 8× the top radius.
+Resolved by the v0.2 spec:
+- ~~Should Attack tops be able to win by stamina at all, or rely on burst/knockout?~~ Attack tops are "most effective when defeating opponents quickly". Burst and knockout are their main paths, but spin wins are not prohibited.
+- ~~Is there a target spin-down time for a lone top of each class?~~ Keep the v0.1 natural spin-down times for now and judge them by battle durations. The duration targets are listed above.
+
+Still open:
+1. Should left-spin tops exist? The physics already supports `spinDirection = −1`, and opposite-spin contacts behave differently.
+2. What is the intended size ratio between stadium and top? The Classic Bowl is currently 8× the top radius.
+
+New in v0.2. These need a design decision; see the balance report.
+
+3. **Titan's endurance.** Defense currently also raises stability, which lowers the toppling speed. With its ball tip, that lets Titan outlast Phantom every time even though their stamina stats are equal. Should defense keep feeding stability this strongly, or should Titan's stamina come only from its stamina stat and parts?
+4. **Inferno's window.** Inferno's flat tip burns its spin in about 25 s, which is too short to burst Phantom or Titan. Should the Attack class get more launch spin, a more efficient tip, or more damage (which would make Inferno vs Tempest a near-certain 5-second win)?
+5. **Stamina races are nearly deterministic** (seed variation changes spin-out times by only a few seconds). Should launch variance increase, or should the future launch-timing minigame supply this variation?
+6. **Opening-clash knockouts.** About 7 % of Inferno vs Tempest battles end in a knockout within the first second or two. Is that acceptable drama, or should launches start further from the rim?
+7. **Health scale** (×10 per stat point) and per-hit damage scale (typical hits 5–60 HP): do they read well? They are purely presentational relative to the formula.

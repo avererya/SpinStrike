@@ -1,6 +1,7 @@
 import type { TopBody } from './body';
 import type { StadiumSurface, WallContactOut } from './stadium/types';
 import { LIMITS } from './units';
+import type { ContactReport } from './combat';
 
 export interface CollisionParams {
   /** Global top–top restitution (multiplied by per-top factors). */
@@ -10,12 +11,26 @@ export interface CollisionParams {
    * chatter, vibration, deformation). 0 disables it.
    */
   energyLoss: number;
+  /**
+   * Weight (0–1) of the stat-based modifiers on impact spin loss
+   * (`impactSpinDrain` from attack, `impactSpinResist` from defense).
+   * 1 reproduces v0.1 exactly. v0.2 lowers it because attack and defense
+   * now act mainly through structural damage, which would otherwise count
+   * offensive strength twice. 0 leaves only the physical (stat-neutral) loss.
+   */
+  statSpinDrainWeight: number;
 }
 
 export const DEFAULT_COLLISION: CollisionParams = {
   restitution: 0.6,
   energyLoss: 0.6,
+  statSpinDrainWeight: 0.5,
 };
+
+/** Effective drain/resist after weighting the stat-based modifiers. */
+export function weightedDrain(drain: number, weight: number): number {
+  return 1 + (drain - 1) * weight;
+}
 
 export interface CollisionEvent {
   kind: 'top' | 'wall';
@@ -75,7 +90,9 @@ export function resolveTopPair(
   params: CollisionParams,
   state: ContactState,
   step: number,
+  report?: ContactReport,
 ): CollisionEvent | null {
+  if (report) report.active = false;
   const dx = B.x - A.x;
   const dy = B.y - A.y;
   const rA = A.params.radius;
@@ -116,6 +133,19 @@ export function resolveTopPair(
   const wasTouching = state.touching;
   state.touching = true;
   let event: CollisionEvent | null = null;
+  if (report) {
+    report.active = true;
+    report.vn = vn;
+    report.vt = vt;
+    report.reducedMass = 1 / (A.invMass + B.invMass);
+    report.jn = 0;
+    report.omegaA = A.omega;
+    report.omegaB = B.omega;
+    report.nx = nx;
+    report.ny = ny;
+    report.x = A.x + nx * rA;
+    report.y = A.y + ny * rA;
+  }
 
   if (vn > 0) {
     const invMassSum = A.invMass + B.invMass;
@@ -124,6 +154,7 @@ export function resolveTopPair(
         ? 0
         : Math.min(0.98, params.restitution * Math.sqrt(A.params.restitution * B.params.restitution));
     const jn = ((1 + e) * vn) / invMassSum;
+    if (report) report.jn = jn;
 
     // Tangential (friction) impulse, including rotational inertia.
     const mu = Math.sqrt(A.params.contactFriction * B.params.contactFriction);
@@ -193,8 +224,9 @@ export function resolveTopPair(
     // Coulomb friction exchange above). Plus a share of the normal impact
     // energy. Both terms only ever remove energy.
     const chatter = CHATTER * jn * Math.abs(vt) + impactEnergy;
-    const lossA = params.energyLoss * chatter * B.params.impactSpinDrain * (1 - A.params.impactSpinResist);
-    const lossB = params.energyLoss * chatter * A.params.impactSpinDrain * (1 - B.params.impactSpinResist);
+    const w = params.statSpinDrainWeight;
+    const lossA = params.energyLoss * chatter * weightedDrain(B.params.impactSpinDrain, w) * (1 - w * A.params.impactSpinResist);
+    const lossB = params.energyLoss * chatter * weightedDrain(A.params.impactSpinDrain, w) * (1 - w * B.params.impactSpinResist);
     A.removeSpinEnergy(lossA);
     B.removeSpinEnergy(lossB);
     A.impactEnergyReceived += impactEnergy;
@@ -258,8 +290,17 @@ const wall: WallContactOut = { nx: 0, ny: 0, penetration: 0 };
 const WALL_SPIN_LOSS = 0.5;
 const WALL_FRICTION = 0.08;
 
+/** Outward normal speed of the most recent wall impact (for rim-escape checks). */
+export const wallImpact = { vn: 0, nx: 0, ny: 0 };
+
 /** Resolves contact between a top and the stadium boundary wall. */
-export function resolveWall(b: TopBody, stadium: StadiumSurface, step: number): CollisionEvent | null {
+export function resolveWall(
+  b: TopBody,
+  stadium: StadiumSurface,
+  step: number,
+  statSpinDrainWeight = 1,
+): CollisionEvent | null {
+  wallImpact.vn = 0;
   if (!stadium.wallContact(b.x, b.y, b.params.radius, wall)) return null;
   const nx = wall.nx;
   const ny = wall.ny;
@@ -267,6 +308,9 @@ export function resolveWall(b: TopBody, stadium: StadiumSurface, step: number): 
   b.y -= ny * wall.penetration;
   const vn = b.vx * nx + b.vy * ny; // > 0 moving into the wall
   if (vn <= 0) return null;
+  wallImpact.vn = vn;
+  wallImpact.nx = nx;
+  wallImpact.ny = ny;
   const e = vn < RESTING_SPEED ? 0 : stadium.wallRestitution;
   const jn = (1 + e) * vn * b.params.mass;
   // Tangential: ring surface velocity at the wall + translational slide.
@@ -282,7 +326,7 @@ export function resolveWall(b: TopBody, stadium: StadiumSurface, step: number): 
   b.vy -= (jn * ny + jt * ty) * b.invMass;
   b.omega -= r * jt * b.invInertia;
   const impactEnergy = 0.5 * b.params.mass * vn * vn;
-  b.removeSpinEnergy(WALL_SPIN_LOSS * impactEnergy * (1 - b.params.impactSpinResist));
+  b.removeSpinEnergy(WALL_SPIN_LOSS * impactEnergy * (1 - statSpinDrainWeight * b.params.impactSpinResist));
   tiltKick(b, -jn * nx, -jn * ny);
   if (vn > COUNT_SPEED * 2) {
     b.wallHits++;

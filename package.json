@@ -1,7 +1,7 @@
 {
   "name": "spinstrike",
-  "version": "0.1.0",
-  "description": "SpinStrike v0.1 physics sandbox",
+  "version": "0.2.0",
+  "description": "SpinStrike v0.2 combat sandbox",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

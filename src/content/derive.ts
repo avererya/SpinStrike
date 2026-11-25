@@ -1,4 +1,5 @@
 import type { TopPhysicsParams } from '../sim/topParams';
+import type { TopCombatStats } from '../sim/combat';
 import { lerp } from '../sim/math';
 import { CORES, DISCS, RINGS, TIPS, type CorePart, type DiscPart, type RingPart, type TipPart } from './parts';
 import type { TopDefinition } from './tops';
@@ -15,7 +16,8 @@ import type { TopDefinition } from './tops';
  *   stamina  → passive spin-decay multiplier ×1.5 … ×0.55
  *   defense  → stability, impact spin resistance, lower restitution
  *   attack   → ring contact friction, blade strike, impact spin drain, higher restitution
- *   health   → (unused in v0.1; reserved for burst/health damage)
+ *   health   → maximum health (× HEALTH_PER_STAT), via deriveTopCombat()
+ *   attack / defense also feed the combat formula directly (deriveTopCombat).
  *
  * Part properties (tip shape, ring radius, disc gyration) supply the
  * remaining physical character.
@@ -70,5 +72,23 @@ export function deriveTopPhysics(def: TopDefinition): TopPhysicsParams {
     spinDirection: def.spinDirection,
     launchSpinEnergy: BASE_LAUNCH_SPIN_ENERGY,
     launchSpeed: lerp(0.3, 1.1, t(s.speed)),
+  };
+}
+
+/** Health points per point of the health stat (provisional). */
+export const HEALTH_PER_STAT = 10;
+
+/**
+ * Combat values. Attack and defense enter the damage formula as-is (the
+ * formula in sim/combat.ts normalises them); health is scaled for readable
+ * numbers. Future equipment/upgrades modify these values the same way they
+ * will modify TopPhysicsParams. No class-specific multipliers exist.
+ */
+export function deriveTopCombat(def: TopDefinition): TopCombatStats {
+  const s = def.stats;
+  return {
+    maxHealth: Math.max(1, s.health) * HEALTH_PER_STAT,
+    attack: Math.max(0, s.attack),
+    defense: Math.max(0, s.defense),
   };
 }
