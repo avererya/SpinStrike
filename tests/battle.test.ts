@@ -10,10 +10,14 @@ function opts(seed = 3, maxDuration = 180) {
 
 describe('battle lifecycle', () => {
   it('terminates with a stamina (spin-out) result', () => {
-    const bt = new Battle(opts());
+    // Structural damage off, so the battle can only end by spin (or knockout).
+    const c = defaultConfig(3);
+    c.combat.damageScale = 0;
+    c.combat.knockouts = false;
+    const bt = new Battle(buildBattleOptions(c));
     const r = bt.runToEnd();
     expect(bt.phase).toBe('finished');
-    expect(r.outcome.kind).toBe('win');
+    expect(r.outcome).toMatchObject({ kind: 'win', finish: 'spin' });
     if (r.outcome.kind === 'win') {
       expect(bt.world.bodies[r.outcome.loser]!.spinning).toBe(false);
       expect(bt.world.bodies[r.outcome.winner]!.spinning).toBe(true);

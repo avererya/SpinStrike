@@ -138,10 +138,21 @@ export class SceneRenderer {
    * Extra feedback for damaging impacts: sparks and an impact ring scaled
    * by damage relative to the target's maximum health.
    */
-  onDamage(events: DamageEvent[]): void {
+  /**
+   * Impact feedback for damaging hits. Critical hits (when `criticalFx`)
+   * get a distinct golden burst of sparks and a larger impact ring.
+   */
+  onDamage(events: DamageEvent[], criticalFx = true): void {
     const w = this.world;
     if (!w) return;
     for (const ev of events) {
+      if (criticalFx && (ev.critToA || ev.critToB)) {
+        const y = (w.stadium.height(ev.x, ev.y) + 0.018) * S;
+        this.sparks.emit(ev.x * S, y, -ev.y * S, ev.nx, -ev.ny, 1, true);
+        this.sparks.emit(ev.x * S, y, -ev.y * S, -ev.nx, ev.ny, 0.6, true);
+        this.rings.emit(ev.x * S, y - 0.1, -ev.y * S, 1.25);
+        continue;
+      }
       const bA = w.bodies[ev.a]!;
       const bB = w.bodies[ev.b]!;
       const rel = Math.max(ev.damageToA / bA.combat.maxHealth, ev.damageToB / bB.combat.maxHealth);

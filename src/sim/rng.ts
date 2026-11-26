@@ -33,3 +33,37 @@ export class Rng {
 export function randomSeed(): number {
   return Math.floor(Math.random() * 0xffffffff) >>> 0;
 }
+
+/**
+ * Stateless 32-bit integer hash (lowbias32 finaliser). Used to derive
+ * independent, event-keyed random values from the battle seed so that a
+ * random decision (a critical hit roll, an AI launch) depends only on its
+ * key, never on how many other random numbers were drawn before it.
+ */
+export function hash32(x: number): number {
+  x = x >>> 0;
+  x ^= x >>> 16;
+  x = Math.imul(x, 0x7feb352d) >>> 0;
+  x ^= x >>> 15;
+  x = Math.imul(x, 0x846ca68b) >>> 0;
+  x ^= x >>> 16;
+  return x >>> 0;
+}
+
+/** Combines several integers into one 32-bit hash (order-sensitive). */
+export function hashKey(...parts: number[]): number {
+  let h = 0x9e3779b9;
+  for (const p of parts) h = hash32((h ^ hash32(p >>> 0)) + 0x632be5ab);
+  return h >>> 0;
+}
+
+/** Uniform float in [0, 1) from a key (deterministic, stateless). */
+export function keyedUniform(...parts: number[]): number {
+  return hashKey(...parts) / 4294967296;
+}
+
+/** Stream identifiers for keyed randomness (arbitrary distinct constants). */
+export const RNG_STREAM = {
+  aiLaunch: 0xa1a0c4,
+  critical: 0xc217,
+} as const;

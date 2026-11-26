@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildBattleOptions, defaultConfig, resolveTopParams } from '../src/config/sandboxConfig';
+import { buildBattleOptions, defaultConfig, legacyV02Config, resolveTopParams } from '../src/config/sandboxConfig';
 import { parseConfigJson, validateConfig } from '../src/config/validate';
 import { deriveTopPhysics } from '../src/content/derive';
 import { STARTER_TOPS } from '../src/content/tops';
@@ -66,7 +66,7 @@ describe('top definitions', () => {
   });
 });
 
-describe('v0.2 configuration', () => {
+describe('v0.2/v0.3 configuration', () => {
   it('every default value is inside its own validation range', () => {
     const r = validateConfig(JSON.parse(JSON.stringify(defaultConfig(9))));
     expect(r.ok, r.ok ? '' : r.errors.join('\n')).toBe(true);
@@ -86,8 +86,13 @@ describe('v0.2 configuration', () => {
     const r = validateConfig(v1);
     expect(r.ok, r.ok ? '' : r.errors.join('\n')).toBe(true);
     if (!r.ok) return;
-    const d = defaultConfig(0);
-    expect(r.config.version).toBe(2);
+    // v0.3: v0.1/v0.2 files migrate to the legacy v0.2 ruleset with the new mechanics off.
+    const d = legacyV02Config(0);
+    expect(r.config.version).toBe(3);
+    expect(r.config.ruleset).toBe('v0.2');
+    expect(r.config.combat.criticalHits).toBe(false);
+    expect(r.config.results.drawWindow).toBe(0);
+    expect(r.config.launch.playerQuality).toBe('poor');
     expect(r.config.seed).toBe(4242);
     expect(r.config.maxDuration).toBe(120);
     expect(r.config.stadium).toEqual({ slope: 0.035, surfaceFriction: 1.1, wallRestitution: 0.45, rimLipHeight: d.stadium.rimLipHeight });
@@ -96,7 +101,7 @@ describe('v0.2 configuration', () => {
     expect(r.config.presentation).toEqual(d.presentation);
     expect(r.config.player).toEqual({ topId: 'tempest', overrides: { mass: 0.05, spinDecay: 0.9 } });
     expect(r.notes.join('\n')).toMatch(/v0\.1/);
-    // And it round-trips as a v2 file afterwards.
+    // And it round-trips as a v3 file afterwards.
     const again = validateConfig(JSON.parse(JSON.stringify(r.config)));
     expect(again.ok).toBe(true);
   });
@@ -130,7 +135,9 @@ describe('v0.2 configuration', () => {
 
   it('rejects unknown versions', () => {
     const c = defaultConfig(1) as unknown as Record<string, any>;
-    c.version = 3;
+    c.version = 4;
+    expect(validateConfig(c).ok).toBe(false);
+    c.version = 0;
     expect(validateConfig(c).ok).toBe(false);
   });
 

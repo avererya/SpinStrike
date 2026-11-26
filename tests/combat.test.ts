@@ -6,6 +6,7 @@ import {
   computeDamage,
   defenseFactor,
   makeContactReport,
+  makeDamageEvent,
   makePairState,
   rimEscape,
   softCap,
@@ -22,7 +23,7 @@ import { flat, makeWorld, place, puck, phantom, bowl } from './helpers';
 import type { World } from '../src/sim/world';
 
 const P: CombatParams = { ...DEFAULT_COMBAT };
-const ev = (): DamageEvent => ({ step: 0, x: 0, y: 0, nx: 0, ny: 0, a: 0, b: 0, damageToA: 0, damageToB: 0, normalSpeed: 0 });
+const ev = (): DamageEvent => makeDamageEvent();
 
 /** Two pucks on a large flat floor, A moving toward B. Returns damage dealt in one contact. */
 function hit(opts: { vx?: number; vy?: number; offset?: number; atkA?: number; defB?: number; massB?: number; omega?: number } = {}) {
@@ -288,7 +289,7 @@ describe('finishes', () => {
     A!.health = 0; // A has burst
     A!.eliminated = 'burst';
     bt.step();
-    expect(bt.result!.outcome).toEqual({ kind: 'draw', finishes: ['burst', 'spin'] });
+    expect(bt.result!.outcome).toEqual({ kind: 'draw', reason: 'same-step', finishes: ['burst', 'spin'] });
   });
 
   it('a mutual burst in one collision is a draw', () => {
@@ -312,7 +313,8 @@ describe('finishes', () => {
       const [A, B] = bt.world.bodies;
       const victim = order === 0 ? A! : B!;
       victim.omega = Math.sign(victim.omega) * victim.criticalSpin * 0.5;
-      bt.step();
+      // v0.3: a lone spin stop opens the draw window; run until resolved.
+      bt.runToEnd();
       const o = bt.result!.outcome;
       r.push(o.kind === 'win' ? `${o.winner === (order === 0 ? 1 : 0)}` : o.kind);
     }
@@ -399,7 +401,7 @@ describe('knockouts (rim escape)', () => {
     const B = bt.world.bodies[1]!;
     B.eliminated = 'knockout';
     bt.step();
-    expect(bt.result!.outcome).toEqual({ kind: 'win', winner: 0, loser: 1, finish: 'knockout' });
+    expect(bt.result!.outcome).toEqual({ kind: 'win', winner: 0, loser: 1, finish: 'knockout', narrow: false });
     // Eliminated tops no longer collide.
     const x = B.x;
     for (let i = 0; i < 100; i++) bt.stepAftermath();

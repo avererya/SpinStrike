@@ -1,17 +1,34 @@
 import { STARTER_TOPS } from '../content/tops';
+import { RULESETS, type Ruleset } from '../content/derive';
+import { LAUNCH_QUALITIES, isLaunchQuality, validDistribution, type LaunchDistribution } from '../sim/launch';
 import {
+  AI_LAUNCH_PARAMS,
   COLLISION_PARAMS,
   COMBAT_PARAMS,
+  LAUNCH_BONUS_PARAMS,
+  LAUNCH_PARAMS,
+  LAUNCH_ZONE_PARAMS,
+  RESULT_PARAMS,
   SIM_LIMITS,
   STADIUM_PARAMS,
   TOP_COMBAT_PARAMS,
   TOP_PARAMS,
   type ParamSpec,
 } from './params';
-import { CONFIG_VERSION, defaultConfig, type SandboxConfig, type TopOverrides, type TopSlotConfig } from './sandboxConfig';
+import {
+  CONFIG_VERSION,
+  defaultConfig,
+  legacyV02Config,
+  type FixedQuality,
+  type LaunchConfig,
+  type PresentationConfig,
+  type SandboxConfig,
+  type TopOverrides,
+  type TopSlotConfig,
+} from './sandboxConfig';
 
 export type ValidationResult =
-  | { ok: true; config: SandboxConfig; /** Notes about migrated / defaulted fields (v0.1 imports). */ notes: string[] }
+  | { ok: true; config: SandboxConfig; /** Notes about migrated / defaulted fields (v0.1/v0.2 imports). */ notes: string[] }
   | { ok: false; errors: string[] };
 
 const ALL_TOP_SPECS: readonly ParamSpec[] = [...TOP_PARAMS, ...TOP_COMBAT_PARAMS];
@@ -98,9 +115,13 @@ function checkSlot(errors: string[], path: string, raw: unknown): TopSlotConfig 
   return typeof topId === 'string' ? { topId, overrides } : undefined;
 }
 
-function checkBool(errors: string[], notes: string[], path: string, v: unknown, def: boolean): boolean {
+function checkBool(errors: string[], notes: string[] | null, path: string, v: unknown, def: boolean, optional: boolean): boolean {
   if (v === undefined) {
-    notes.push(`${path}: not in file, using default ${def}`);
+    if (!optional) {
+      errors.push(`${path} must be true or false`);
+      return def;
+    }
+    notes?.push(`${path}: not in file, using default ${def}`);
     return def;
   }
   if (typeof v !== 'boolean') {
@@ -110,33 +131,89 @@ function checkBool(errors: string[], notes: string[], path: string, v: unknown, 
   return v;
 }
 
+function checkQuality(errors: string[], path: string, v: unknown): FixedQuality {
+  if (v === 'auto' || isLaunchQuality(v)) return v;
+  errors.push(`${path} must be one of: auto, ${LAUNCH_QUALITIES.join(', ')}`);
+  return 'auto';
+}
+
+function checkLaunch(errors: string[], raw: unknown, d: LaunchConfig): LaunchConfig {
+  const notes: string[] = [];
+  if (!isObj(raw)) {
+    errors.push('launch must be an object');
+    return d;
+  }
+  const none = new Set<string>();
+  const nums = checkGroup(errors, notes, 'launch', raw, LAUNCH_PARAMS, d as unknown as Record<string, number>, none, [
+    'minigame',
+    'playerQuality',
+    'opponentQuality',
+    'zones',
+    'bonuses',
+    'aiDistribution',
+  ]);
+  const zones = checkGroup(errors, notes, 'launch.zones', raw.zones, LAUNCH_ZONE_PARAMS, d.zones as unknown as Record<string, number>, none);
+  const bonuses = checkGroup(errors, notes, 'launch.bonuses', raw.bonuses, LAUNCH_BONUS_PARAMS, d.bonuses as unknown as Record<string, number>, none);
+  const dist = checkGroup(errors, notes, 'launch.aiDistribution', raw.aiDistribution, AI_LAUNCH_PARAMS, d.aiDistribution as unknown as Record<string, number>, none);
+  if (zones && zones.perfect !== undefined && zones.great !== undefined && zones.good !== undefined) {
+    if (!(zones.perfect < zones.great && zones.great < zones.good)) errors.push('launch.zones must satisfy perfect < great < good');
+  }
+  if (dist && Object.keys(dist).length === 4 && !validDistribution(dist as unknown as LaunchDistribution)) {
+    errors.push('launch.aiDistribution probabilities must sum to 1');
+  }
+  return {
+    minigame: checkBool(errors, null, 'launch.minigame', raw.minigame, d.minigame, false),
+    playerQuality: checkQuality(errors, 'launch.playerQuality', raw.playerQuality),
+    opponentQuality: checkQuality(errors, 'launch.opponentQuality', raw.opponentQuality),
+    sweepTime: nums?.sweepTime ?? d.sweepTime,
+    timeout: nums?.timeout ?? d.timeout,
+    zones: (zones as unknown as LaunchConfig['zones']) ?? d.zones,
+    bonuses: (bonuses as unknown as LaunchConfig['bonuses']) ?? d.bonuses,
+    aiDistribution: (dist as unknown as LaunchConfig['aiDistribution']) ?? d.aiDistribution,
+  };
+}
+
 /**
  * Validates untrusted JSON (e.g. an imported file) into a SandboxConfig.
  *
- * Accepts the current format (version 2) and SpinStrike v0.1 files
- * (version 1). v0.1 files are migrated: every v0.1 value is kept exactly,
- * and the parameters that did not exist in v0.1 (combat, rim lip, combat
- * spin-drain weight, presentation switches, per-top health/attack/defense)
- * take their v0.2 defaults. Nothing valid is discarded; anything invalid is
- * reported as an error rather than silently corrected.
+ * Accepts the current format (version 3) and older files:
+ *   - version 1 (SpinStrike v0.1) and version 2 (v0.2) are MIGRATED to the
+ *     legacy v0.2 ruleset: every value in the file is kept exactly; values
+ *     the file does not contain take the v0.2 defaults; the v0.3 mechanics
+ *     (critical hits, launch bonuses, draw window) are OFF so the imported
+ *     configuration reproduces its original battles. Notes explain how to
+ *     switch to the v0.3 ruleset and mechanics in the developer panel.
+ *   - Nothing valid is discarded; anything invalid is reported as an error
+ *     rather than silently corrected.
  */
 export function validateConfig(raw: unknown): ValidationResult {
   const errors: string[] = [];
   const notes: string[] = [];
   if (!isObj(raw)) return { ok: false, errors: ['Configuration must be a JSON object'] };
   const version = raw.version;
-  if (version !== 1 && version !== CONFIG_VERSION) {
-    return { ok: false, errors: [`version must be 1 (v0.1) or ${CONFIG_VERSION} (got ${JSON.stringify(version)})`] };
+  if (version !== 1 && version !== 2 && version !== CONFIG_VERSION) {
+    return { ok: false, errors: [`version must be 1 (v0.1), 2 (v0.2) or ${CONFIG_VERSION} (v0.3) (got ${JSON.stringify(version)})`] };
   }
   const v1 = version === 1;
-  if (v1) notes.push('Migrated a v0.1 (version 1) configuration: new v0.2 parameters use their defaults.');
-  const d = defaultConfig(0);
+  const legacy = version === 1 || version === 2;
+  if (legacy) {
+    notes.push(
+      `Migrated a ${v1 ? 'v0.1 (version 1)' : 'v0.2 (version 2)'} configuration to the legacy v0.2 ruleset: all values in the file are kept, missing values use v0.2 defaults, and the v0.3 mechanics (critical hits, launch bonuses, draw window) are off so it reproduces the original battles. Switch the ruleset to v0.3 and enable the new mechanics in the developer panel to play it under v0.3 rules.`,
+    );
+  }
+  const d = legacy ? legacyV02Config(0) : defaultConfig(0);
 
   const seed = raw.seed;
   if (typeof seed !== 'number' || !Number.isInteger(seed) || seed < 0 || seed > 0xffffffff) {
     errors.push('seed must be an integer between 0 and 4294967295');
   }
   checkNumber(errors, 'maxDuration', raw.maxDuration, SIM_LIMITS.maxDuration.min, SIM_LIMITS.maxDuration.max);
+
+  let ruleset: Ruleset = d.ruleset;
+  if (!legacy) {
+    if (typeof raw.ruleset === 'string' && (RULESETS as readonly string[]).includes(raw.ruleset)) ruleset = raw.ruleset as Ruleset;
+    else errors.push(`ruleset must be one of: ${RULESETS.join(', ')}`);
+  }
 
   // Fields new in v0.2 are optional in v1 files only.
   const stadiumOpt = new Set<string>(v1 ? ['rimLipHeight'] : []);
@@ -145,17 +222,18 @@ export function validateConfig(raw: unknown): ValidationResult {
   const stadium = checkGroup(errors, notes, 'stadium', raw.stadium, STADIUM_PARAMS, d.stadium, stadiumOpt);
   const collision = checkGroup(errors, notes, 'collision', raw.collision, COLLISION_PARAMS, d.collision, collisionOpt);
   const rawCombat = raw.combat;
-  const combatNums = checkGroup(errors, notes, 'combat', rawCombat, COMBAT_PARAMS, d.combat as unknown as Record<string, number>, combatOpt, ['knockouts']);
-  const knockouts = checkBool(
-    errors,
-    v1 ? notes : [],
-    'combat.knockouts',
-    isObj(rawCombat) ? rawCombat.knockouts : undefined,
-    d.combat.knockouts,
-  );
-  if (!v1 && isObj(rawCombat) && rawCombat.knockouts === undefined) errors.push('combat.knockouts must be true or false');
+  const combatNums = checkGroup(errors, notes, 'combat', rawCombat, COMBAT_PARAMS, d.combat as unknown as Record<string, number>, combatOpt, [
+    'knockouts',
+    'criticalHits',
+  ]);
+  const rc = isObj(rawCombat) ? rawCombat : {};
+  const knockouts = checkBool(errors, v1 ? notes : null, 'combat.knockouts', rc.knockouts, d.combat.knockouts, v1 && rawCombat === undefined);
+  // Critical hits did not exist before v0.3: legacy files get them off.
+  const criticalHits = legacy
+    ? (rc.criticalHits === undefined ? false : checkBool(errors, null, 'combat.criticalHits', rc.criticalHits, false, true))
+    : checkBool(errors, null, 'combat.criticalHits', rc.criticalHits, d.combat.criticalHits, false);
 
-  let presentation = d.presentation;
+  let presentation: PresentationConfig = { ...d.presentation };
   const rawPres = raw.presentation;
   if (rawPres === undefined && v1) {
     notes.push('presentation: not in file, using defaults');
@@ -163,18 +241,29 @@ export function validateConfig(raw: unknown): ValidationResult {
     errors.push('presentation must be an object');
   } else {
     presentation = {
-      cinematicFinishes: checkBool(errors, notes, 'presentation.cinematicFinishes', rawPres.cinematicFinishes, d.presentation.cinematicFinishes),
-      damageNumbers: checkBool(errors, notes, 'presentation.damageNumbers', rawPres.damageNumbers, d.presentation.damageNumbers),
+      cinematicFinishes: checkBool(errors, notes, 'presentation.cinematicFinishes', rawPres.cinematicFinishes, d.presentation.cinematicFinishes, false),
+      damageNumbers: checkBool(errors, notes, 'presentation.damageNumbers', rawPres.damageNumbers, d.presentation.damageNumbers, false),
+      criticalEffects: checkBool(errors, legacy ? null : notes, 'presentation.criticalEffects', rawPres.criticalEffects, d.presentation.criticalEffects, legacy),
     };
     for (const k of Object.keys(rawPres)) {
-      if (k !== 'cinematicFinishes' && k !== 'damageNumbers') errors.push(`presentation.${k} is not a recognised parameter`);
+      if (!['cinematicFinishes', 'damageNumbers', 'criticalEffects'].includes(k)) errors.push(`presentation.${k} is not a recognised parameter`);
     }
+  }
+
+  // v0.3 groups: required in version 3, defaulted (legacy: mechanics off) in older files.
+  let launch = d.launch;
+  let results = d.results;
+  if (!legacy) {
+    launch = checkLaunch(errors, raw.launch, d.launch);
+    const res = checkGroup(errors, notes, 'results', raw.results, RESULT_PARAMS, d.results as unknown as Record<string, number>, new Set());
+    if (res) results = res as unknown as SandboxConfig['results'];
   }
 
   const player = checkSlot(errors, 'player', raw.player);
   const opponent = checkSlot(errors, 'opponent', raw.opponent);
-  const known = ['version', 'seed', 'maxDuration', 'stadium', 'collision', 'combat', 'presentation', 'player', 'opponent'];
+  const known = ['version', 'ruleset', 'seed', 'maxDuration', 'stadium', 'collision', 'combat', 'launch', 'results', 'presentation', 'player', 'opponent'];
   for (const k of Object.keys(raw)) if (!known.includes(k)) errors.push(`${k} is not a recognised setting`);
+  if (legacy) for (const k of ['ruleset', 'launch', 'results']) if (raw[k] !== undefined) errors.push(`${k} is not valid in a version ${version as number} file`);
 
   if (errors.length > 0 || !stadium || !collision || !combatNums || !player || !opponent) {
     return { ok: false, errors: errors.length ? errors : ['Invalid configuration'] };
@@ -184,11 +273,14 @@ export function validateConfig(raw: unknown): ValidationResult {
     notes,
     config: {
       version: CONFIG_VERSION,
+      ruleset,
       seed: seed as number,
       maxDuration: raw.maxDuration as number,
       stadium: stadium as SandboxConfig['stadium'],
       collision: collision as SandboxConfig['collision'],
-      combat: { ...(combatNums as Omit<SandboxConfig['combat'], 'knockouts'>), knockouts },
+      combat: { ...(combatNums as unknown as SandboxConfig['combat']), knockouts, criticalHits },
+      launch: JSON.parse(JSON.stringify(launch)) as LaunchConfig,
+      results: { ...results },
       presentation,
       player,
       opponent,

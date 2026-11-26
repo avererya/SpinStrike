@@ -136,6 +136,8 @@ export class Sparks {
   private readonly vel = new Float32Array(MAX_SPARKS * 3);
   private readonly life = new Float32Array(MAX_SPARKS);
   private readonly maxLife = new Float32Array(MAX_SPARKS);
+  /** 1 = golden critical-hit spark (whiter, brighter), 0 = ordinary. */
+  private readonly gold = new Uint8Array(MAX_SPARKS);
   private next = 0;
   private readonly geo = new THREE.BufferGeometry();
   private seed = 12345;
@@ -164,8 +166,8 @@ export class Sparks {
   }
 
   /** Emit sparks at (x,y,z) travelling roughly perpendicular to normal (nx,nz). */
-  emit(x: number, y: number, z: number, nx: number, nz: number, intensity: number): void {
-    const n = Math.min(40, Math.round(4 + intensity * 36));
+  emit(x: number, y: number, z: number, nx: number, nz: number, intensity: number, golden = false): void {
+    const n = Math.min(golden ? 56 : 40, Math.round(4 + intensity * (golden ? 52 : 36)));
     for (let k = 0; k < n; k++) {
       const i = this.next;
       this.next = (this.next + 1) % MAX_SPARKS;
@@ -181,7 +183,8 @@ export class Sparks {
       this.vel[i * 3] = dx;
       this.vel[i * 3 + 1] = (0.5 + this.rand() * 1.5) * (0.5 + intensity);
       this.vel[i * 3 + 2] = dz;
-      const l = 0.18 + this.rand() * 0.25;
+      const l = (0.18 + this.rand() * 0.25) * (golden ? 1.35 : 1);
+      this.gold[i] = golden ? 1 : 0;
       this.life[i] = l;
       this.maxLife[i] = l;
     }
@@ -197,9 +200,15 @@ export class Sparks {
       this.pos[o + 1]! += this.vel[o + 1]! * dt;
       this.pos[o + 2]! += this.vel[o + 2]! * dt;
       const t = Math.max(0, this.life[i]! / this.maxLife[i]!);
-      this.col[o] = 1 * t;
-      this.col[o + 1] = (0.55 + 0.4 * t) * t;
-      this.col[o + 2] = 0.2 * t * t;
+      if (this.gold[i]) {
+        this.col[o] = 1.3 * t;
+        this.col[o + 1] = (0.9 + 0.3 * t) * t;
+        this.col[o + 2] = 0.45 * t;
+      } else {
+        this.col[o] = 1 * t;
+        this.col[o + 1] = (0.55 + 0.4 * t) * t;
+        this.col[o + 2] = 0.2 * t * t;
+      }
       if (this.life[i]! <= 0) this.pos[o + 1] = -100;
     }
     this.geo.attributes.position!.needsUpdate = true;

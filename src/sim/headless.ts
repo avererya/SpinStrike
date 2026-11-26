@@ -11,6 +11,8 @@ export interface BattleRecord {
   maxSpeed: number;
   guardTrips: number;
   nonFinite: boolean;
+  /** Impacts in which each top dealt damage (critical-roll opportunities). */
+  damagingHits: [number, number];
 }
 
 export interface BatchStats {
@@ -98,7 +100,15 @@ export function runBatch(make: (seed: number) => BattleOptions, count: number, s
     }
     stats.avgMaxSpeed += battleMax;
     stats.maxTranslationalSpeed = Math.max(stats.maxTranslationalSpeed, battleMax);
-    stats.records.push({ seed, result, collisions: bodies[0]!.collisions, maxSpeed: battleMax, guardTrips: trips, nonFinite });
+    stats.records.push({
+      seed,
+      result,
+      collisions: bodies[0]!.collisions,
+      maxSpeed: battleMax,
+      guardTrips: trips,
+      nonFinite,
+      damagingHits: [bodies[0]!.damagingHits, bodies[1]!.damagingHits],
+    });
     if (trips > 0 || nonFinite) {
       stats.failures++;
       stats.failureDetails.push(`seed ${seed}: guardTrips=${trips} nonFinite=${nonFinite}`);
