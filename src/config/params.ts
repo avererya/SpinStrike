@@ -62,6 +62,9 @@ export const TOP_PARAMS = [
   { key: 'spinDecay', label: 'Rotational energy decay', min: 0, max: 4, step: 0.05, unit: '×', help: 'Multiplier on passive spin friction and air drag.' },
   { key: 'stability', label: 'Stability', min: 0, max: 1, step: 0.01, unit: '', help: 'Resists wobble and tilt kicks; lowers toppling speed.' },
   { key: 'wobbleIntensity', label: 'Wobble intensity', min: 0, max: 1, step: 0.01, unit: 'rad', help: 'How strongly wobble grows as spin runs down.' },
+  { key: 'tipDriveRadius', label: 'Tip drive radius', min: 0, max: 0.015, step: 0.0001, unit: 'm', help: 'How far the tip contact moves off-axis when leaning: sets the tip-driven travel speed.' },
+  { key: 'rollingResistance', label: 'Rolling resistance', min: 0, max: 1, step: 0.01, unit: '1/s', help: 'Translational damping from the tip (ball tips settle to the centre).' },
+  { key: 'contactWander', label: 'Contact wander', min: 0, max: 0.2, step: 0.001, unit: 'rad', help: 'Seeded, smooth variation of the tip contact orientation (v0.4.1).' },
 ] as const satisfies readonly ParamSpec[];
 
 export type StadiumParamKey = (typeof STADIUM_PARAMS)[number]['key'];
@@ -114,6 +117,23 @@ export const RESULT_PARAMS = [
   { key: 'drawWindow', label: 'Spin-finish draw window', min: 0, max: 2, step: 0.01, unit: 's', help: 'If the second top stops within this simulated time of the first, the battle is a draw. 0 = v0.2 rule (same step only).' },
   { key: 'narrowThreshold', label: 'Narrow victory threshold', min: 0, max: 0.2, step: 0.005, unit: '', help: 'Spin wins with winner stamina at or below this fraction are labelled NARROW VICTORY (presentation only).' },
 ] as const satisfies readonly ParamSpec[];
+
+/**
+ * v0.4.1 natural movement variability (developer controls). All seeded;
+ * 'naturalVariation' off = the v0.4.0 launch and a perfect floor.
+ */
+export const MOVEMENT_PARAMS = [
+  { key: 'positionVariation', label: 'Launch position variation', min: 0, max: 1.5, step: 0.01, unit: 'rad', help: 'Half-range of each top’s independent placement angle around the bowl.' },
+  { key: 'radiusVariation', label: 'Launch radius variation', min: 0, max: 0.4, step: 0.01, unit: '×', help: 'Half-range of the placement distance from the centre (fraction).' },
+  { key: 'headingVariation', label: 'Launch heading variation', min: 0, max: 0.6, step: 0.01, unit: 'rad', help: 'Half-range of natural heading error around the aim.' },
+  { key: 'speedVariation', label: 'Launch speed variation', min: 0, max: 0.4, step: 0.01, unit: '×', help: 'Half-range of translational launch speed (fraction).' },
+  { key: 'tiltVariation', label: 'Release tilt variation', min: 0, max: 0.2, step: 0.005, unit: 'rad', help: 'Half-range of natural release-tilt error around the aim.' },
+  { key: 'energyVariation', label: 'Launch energy variation', min: 0, max: 0.2, step: 0.005, unit: '×', help: 'Half-range of launch rotational energy (independent of launch quality).' },
+  { key: 'floorRelief', label: 'Floor micro-relief (RMS)', min: 0, max: 0.002, step: 0.00005, unit: 'm', help: 'Seeded long-wavelength unevenness of the floor. Conservative (part of the height field).' },
+  { key: 'floorFrictionVariation', label: 'Floor grip variation (RMS)', min: 0, max: 0.3, step: 0.01, unit: '×', help: 'Seeded variation of surface friction across the floor. Dissipative only.' },
+  { key: 'contactWanderScale', label: 'Contact wander scale', min: 0, max: 4, step: 0.05, unit: '×', help: 'Multiplier on every tip’s contact wander (tip property). 0 = steady contact.' },
+] as const satisfies readonly ParamSpec[];
+export type MovementParamKey = (typeof MOVEMENT_PARAMS)[number]['key'];
 
 export const SIM_LIMITS = {
   maxDuration: { min: 5, max: 600 },

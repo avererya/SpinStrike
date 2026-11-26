@@ -5,6 +5,7 @@ import { DIFFICULTY_LAUNCH, rankDef, type Difficulty } from './config';
 import { effectiveStats } from './progression';
 import { generateOpponent, type OpponentBuild } from './opponents';
 import type { OwnedTop } from './save';
+import { DEFAULT_AIM, clampAim } from '../sim/launchGeometry';
 
 export const CLASSIC_ARENA_ID = 'classic';
 
@@ -51,13 +52,16 @@ export function createBattleSetup(args: {
  * cannot leak in), with each side's upgraded effective stats and the
  * difficulty's AI launch distribution.
  */
-export function buildCareerConfig(setup: CareerBattleSetup, player: Pick<OwnedTop, 'definitionId' | 'upgrades'>): SandboxConfig {
+export function buildCareerConfig(setup: CareerBattleSetup, player: Pick<OwnedTop, 'definitionId' | 'upgrades' | 'launchAim'>): SandboxConfig {
   const c = defaultConfig(setup.seed);
   const p = effectiveStats(getTop(player.definitionId), player.upgrades);
   const o = effectiveStats(getTop(setup.opponent.topId), setup.opponent.ranks);
   c.player = { topId: player.definitionId, overrides: {}, stats: p.stats, critChance: p.critChance };
   c.opponent = { topId: setup.opponent.topId, overrides: {}, stats: o.stats, critChance: o.critChance };
   c.launch.aiDistribution = { ...DIFFICULTY_LAUNCH[setup.difficulty] };
+  // v0.4.1: the player's remembered aim; the opponent aims with the seeded AI profile.
+  c.launch.playerAim = clampAim(player.launchAim ?? DEFAULT_AIM);
+  c.launch.opponentAim = 'auto';
   return c;
 }
 

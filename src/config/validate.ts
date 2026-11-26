@@ -8,6 +8,7 @@ import {
   LAUNCH_BONUS_PARAMS,
   LAUNCH_PARAMS,
   LAUNCH_ZONE_PARAMS,
+  MOVEMENT_PARAMS,
   RESULT_PARAMS,
   SIM_LIMITS,
   STADIUM_PARAMS,
@@ -15,9 +16,11 @@ import {
   TOP_PARAMS,
   type ParamSpec,
 } from './params';
+import { AIM_LIMITS, type LaunchAim } from '../sim/launchGeometry';
 import {
   CONFIG_VERSION,
   defaultConfig,
+  legacyMovementConfig,
   legacyV02Config,
   type FixedQuality,
   type LaunchConfig,
@@ -137,7 +140,30 @@ function checkQuality(errors: string[], path: string, v: unknown): FixedQuality 
   return 'auto';
 }
 
-function checkLaunch(errors: string[], raw: unknown, d: LaunchConfig): LaunchConfig {
+function checkAim(errors: string[], path: string, v: unknown, allowAuto: boolean): LaunchAim | 'auto' | undefined {
+  if (allowAuto && v === 'auto') return 'auto';
+  if (!isObj(v)) {
+    errors.push(`${path} must be ${allowAuto ? "'auto' or " : ''}an object {direction, tilt}`);
+    return undefined;
+  }
+  const dir = checkNumber(errors, `${path}.direction`, v.direction, AIM_LIMITS.direction.min, AIM_LIMITS.direction.max);
+  const tilt = checkNumber(errors, `${path}.tilt`, v.tilt, AIM_LIMITS.tilt.min, AIM_LIMITS.tilt.max);
+  for (const k of Object.keys(v)) if (k !== 'direction' && k !== 'tilt') errors.push(`${path}.${k} is not a recognised parameter`);
+  return dir !== undefined && tilt !== undefined ? { direction: dir, tilt } : undefined;
+}
+
+function checkRange(errors: string[], path: string, v: unknown, lim: { min: number; max: number }): { min: number; max: number } | undefined {
+  if (!isObj(v)) {
+    errors.push(`${path} must be an object {min, max}`);
+    return undefined;
+  }
+  const lo = checkNumber(errors, `${path}.min`, v.min, lim.min, lim.max);
+  const hi = checkNumber(errors, `${path}.max`, v.max, lim.min, lim.max);
+  if (lo !== undefined && hi !== undefined && lo > hi) errors.push(`${path}.min must not exceed ${path}.max`);
+  return lo !== undefined && hi !== undefined ? { min: lo, max: hi } : undefined;
+}
+
+function checkLaunch(errors: string[], raw: unknown, d: LaunchConfig, v3: boolean): LaunchConfig {
   const notes: string[] = [];
   if (!isObj(raw)) {
     errors.push('launch must be an object');
@@ -151,7 +177,23 @@ function checkLaunch(errors: string[], raw: unknown, d: LaunchConfig): LaunchCon
     'zones',
     'bonuses',
     'aiDistribution',
+    'playerAim',
+    'opponentAim',
+    'aiAim',
   ]);
+  // Aim fields are new in v0.4.1 (version 4); version 3 files get the defaults.
+  let playerAim: LaunchAim = d.playerAim;
+  let opponentAim: LaunchAim | 'auto' = d.opponentAim;
+  let aiAimProfile = d.aiAim;
+  if (!v3 || raw.playerAim !== undefined) playerAim = (checkAim(errors, 'launch.playerAim', raw.playerAim, false) as LaunchAim | undefined) ?? d.playerAim;
+  if (!v3 || raw.opponentAim !== undefined) opponentAim = checkAim(errors, 'launch.opponentAim', raw.opponentAim, true) ?? d.opponentAim;
+  if (!v3 || raw.aiAim !== undefined) {
+    const a = isObj(raw.aiAim) ? raw.aiAim : {};
+    if (!isObj(raw.aiAim)) errors.push('launch.aiAim must be an object');
+    const dr = checkRange(errors, 'launch.aiAim.direction', a.direction, AIM_LIMITS.direction);
+    const tr = checkRange(errors, 'launch.aiAim.tilt', a.tilt, AIM_LIMITS.tilt);
+    if (dr && tr) aiAimProfile = { direction: dr, tilt: tr };
+  }
   const zones = checkGroup(errors, notes, 'launch.zones', raw.zones, LAUNCH_ZONE_PARAMS, d.zones as unknown as Record<string, number>, none);
   const bonuses = checkGroup(errors, notes, 'launch.bonuses', raw.bonuses, LAUNCH_BONUS_PARAMS, d.bonuses as unknown as Record<string, number>, none);
   const dist = checkGroup(errors, notes, 'launch.aiDistribution', raw.aiDistribution, AI_LAUNCH_PARAMS, d.aiDistribution as unknown as Record<string, number>, none);
@@ -170,6 +212,9 @@ function checkLaunch(errors: string[], raw: unknown, d: LaunchConfig): LaunchCon
     zones: (zones as unknown as LaunchConfig['zones']) ?? d.zones,
     bonuses: (bonuses as unknown as LaunchConfig['bonuses']) ?? d.bonuses,
     aiDistribution: (dist as unknown as LaunchConfig['aiDistribution']) ?? d.aiDistribution,
+    playerAim,
+    opponentAim,
+    aiAim: aiAimProfile,
   };
 }
 
@@ -191,10 +236,16 @@ export function validateConfig(raw: unknown): ValidationResult {
   const notes: string[] = [];
   if (!isObj(raw)) return { ok: false, errors: ['Configuration must be a JSON object'] };
   const version = raw.version;
-  if (version !== 1 && version !== 2 && version !== CONFIG_VERSION) {
-    return { ok: false, errors: [`version must be 1 (v0.1), 2 (v0.2) or ${CONFIG_VERSION} (v0.3) (got ${JSON.stringify(version)})`] };
+  if (version !== 1 && version !== 2 && version !== 3 && version !== CONFIG_VERSION) {
+    return { ok: false, errors: [`version must be 1 (v0.1), 2 (v0.2), 3 (v0.3 – v0.4.0) or ${CONFIG_VERSION} (v0.4.1) (got ${JSON.stringify(version)})`] };
   }
   const v1 = version === 1;
+  const v3 = version === 3;
+  if (v3) {
+    notes.push(
+      'Migrated a version 3 (v0.3 – v0.4.0) configuration: every value is kept, and the v0.4.1 movement variability (launch variation, aiming, floor relief, contact wander) is off so it reproduces its original battles. Turn on natural variation and choose the v0.4.1 ruleset in the developer panel to play it under v0.4.1 rules.',
+    );
+  }
   const legacy = version === 1 || version === 2;
   if (legacy) {
     notes.push(
@@ -254,14 +305,22 @@ export function validateConfig(raw: unknown): ValidationResult {
   let launch = d.launch;
   let results = d.results;
   if (!legacy) {
-    launch = checkLaunch(errors, raw.launch, d.launch);
+    launch = checkLaunch(errors, raw.launch, d.launch, v3);
     const res = checkGroup(errors, notes, 'results', raw.results, RESULT_PARAMS, d.results as unknown as Record<string, number>, new Set());
     if (res) results = res as unknown as SandboxConfig['results'];
   }
 
+  let movement = legacy || v3 ? legacyMovementConfig() : d.movement;
+  if (!legacy && !v3) {
+    const rm = raw.movement;
+    const nums = checkGroup(errors, notes, 'movement', rm, MOVEMENT_PARAMS, d.movement as unknown as Record<string, number>, new Set(), ['naturalVariation']);
+    const nv = checkBool(errors, null, 'movement.naturalVariation', isObj(rm) ? rm.naturalVariation : undefined, true, false);
+    if (nums) movement = { ...(nums as unknown as SandboxConfig['movement']), naturalVariation: nv };
+  } else if (raw.movement !== undefined) errors.push(`movement is not valid in a version ${version as number} file`);
+
   const player = checkSlot(errors, 'player', raw.player);
   const opponent = checkSlot(errors, 'opponent', raw.opponent);
-  const known = ['version', 'ruleset', 'seed', 'maxDuration', 'stadium', 'collision', 'combat', 'launch', 'results', 'presentation', 'player', 'opponent'];
+  const known = ['version', 'ruleset', 'seed', 'maxDuration', 'stadium', 'collision', 'combat', 'launch', 'movement', 'results', 'presentation', 'player', 'opponent'];
   for (const k of Object.keys(raw)) if (!known.includes(k)) errors.push(`${k} is not a recognised setting`);
   if (legacy) for (const k of ['ruleset', 'launch', 'results']) if (raw[k] !== undefined) errors.push(`${k} is not valid in a version ${version as number} file`);
 
@@ -280,6 +339,7 @@ export function validateConfig(raw: unknown): ValidationResult {
       collision: collision as SandboxConfig['collision'],
       combat: { ...(combatNums as unknown as SandboxConfig['combat']), knockouts, criticalHits },
       launch: JSON.parse(JSON.stringify(launch)) as LaunchConfig,
+      movement: { ...movement },
       results: { ...results },
       presentation,
       player,

@@ -190,17 +190,19 @@ describe('credits, XP, ranks and exactly-once rewards', () => {
   });
   it('applies difficulty multipliers', () => {
     const { store } = started();
-    expect(store.settleBattle(setupFor(store, 'e', 'expert'), fake('win'))!.reward).toEqual({ credits: 200, xp: 100 });
-    expect(store.settleBattle(setupFor(store, 'z', 'easy'), fake('win'))!.reward).toEqual({ credits: 50, xp: 25 });
+    expect(store.settleBattle(setupFor(store, 'e', 'expert'), fake('win'))!.reward).toEqual({ credits: 120, xp: 60 });
+    expect(store.settleBattle(setupFor(store, 'h', 'hard'), fake('win'))!.reward).toEqual({ credits: 110, xp: 55 });
+    expect(store.settleBattle(setupFor(store, 'z', 'easy'), fake('win'))!.reward).toEqual({ credits: 75, xp: 38 });
   });
   it('levels up with overflow and reports unlocked ranks', () => {
     const { store } = started();
-    const first = store.settleBattle(setupFor(store, 'x0', 'expert'), fake('win'))!; // 100 XP = exactly level 2
-    store.settleBattle(setupFor(store, 'x1', 'expert'), fake('win')); // +100 into level 2
+    const first = store.settleBattle(setupFor(store, 'x0', 'expert'), fake('win'))!; // 60 XP
+    const second = store.settleBattle(setupFor(store, 'x1', 'expert'), fake('win'))!; // 120 XP: level 2 with 20 overflow
+    expect(first.top.levelUps).toEqual([]);
     expect(store.activeTop!.level).toBe(2);
-    expect(store.activeTop!.xp).toBe(100);
-    expect(first.top.levelUps.map((l) => l.to)).toEqual([2]);
-    expect(first.top.levelUps[0]!.newMaxRank).toBeNull();
+    expect(store.activeTop!.xp).toBe(20);
+    expect(second.top.levelUps.map((l) => l.to)).toEqual([2]);
+    expect(second.top.levelUps[0]!.newMaxRank).toBeNull();
   });
   it('advances rank on wins, never demotes, and keeps playing at the limit', () => {
     const { store } = started();

@@ -42,6 +42,15 @@ export interface BattleRecord {
   damageReceived: number;
   crits: number;
   rewards: { credits: number; xp: number };
+  /**
+   * Physics / combat ruleset the battle was played under (v0.4.1+). Absent
+   * on records made before v0.4.1: they are NOT back-filled, because the
+   * version cannot be proven from the record.
+   */
+  ruleset?: string;
+  /** Launch aim of the player and the opponent (v0.4.1+; absent on older records). */
+  aim?: { direction: number; tilt: number };
+  opponentAim?: { direction: number; tilt: number };
 }
 
 export interface TopStats {
@@ -206,7 +215,14 @@ function sanitizeRecord(v: unknown): BattleRecord | null {
     damageReceived: num(v.damageReceived, 0),
     crits: int(v.crits, 0),
     rewards: { credits: int(rw.credits, 0), xp: int(rw.xp, 0) },
+    ...(typeof v.ruleset === 'string' && v.ruleset.length > 0 && v.ruleset.length < 32 ? { ruleset: v.ruleset } : {}),
+    ...(isAimLike(v.aim) ? { aim: { direction: v.aim.direction, tilt: v.aim.tilt } } : {}),
+    ...(isAimLike(v.opponentAim) ? { opponentAim: { direction: v.opponentAim.direction, tilt: v.opponentAim.tilt } } : {}),
   };
+}
+
+function isAimLike(v: unknown): v is { direction: number; tilt: number } {
+  return isObj(v) && typeof v.direction === 'number' && Number.isFinite(v.direction) && typeof v.tilt === 'number' && Number.isFinite(v.tilt);
 }
 
 export function sanitizeTopStats(v: unknown): TopStats {

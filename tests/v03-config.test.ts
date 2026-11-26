@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { buildBattleOptions, defaultConfig, legacyV02Config } from '../src/config/sandboxConfig';
+import { CONFIG_VERSION, buildBattleOptions, defaultConfig, legacyV02Config } from '../src/config/sandboxConfig';
 import { validateConfig } from '../src/config/validate';
 import { runBatch } from '../src/sim/headless';
 import { renormalise } from '../src/ui/devPanel';
 import { LAUNCH_QUALITIES } from '../src/sim/launch';
 import { DEFAULT_COMBAT, strikeEnergy } from '../src/sim/combat';
 import { deriveTopPhysics } from '../src/content/derive';
-import { getTop } from '../src/content/tops';
+import { LEGACY_V040_STATS, getTop } from '../src/content/tops';
 
 describe('v0.3 configuration', () => {
   it('migrates a v0.2 (version 2) file to the legacy ruleset, keeping all values, new mechanics off', () => {
@@ -14,6 +14,7 @@ describe('v0.3 configuration', () => {
     v2.version = 2;
     delete v2.ruleset;
     delete v2.launch;
+    delete v2.movement;
     delete v2.results;
     delete v2.combat.criticalHits;
     delete v2.presentation.criticalEffects;
@@ -22,8 +23,9 @@ describe('v0.3 configuration', () => {
     const r = validateConfig(v2);
     expect(r.ok, r.ok ? '' : r.errors.join('\n')).toBe(true);
     if (!r.ok) return;
-    expect(r.config.version).toBe(3);
+    expect(r.config.version).toBe(CONFIG_VERSION);
     expect(r.config.ruleset).toBe('v0.2');
+    expect(r.config.movement.naturalVariation).toBe(false);
     expect(r.config.combat.damageScale).toBe(42);
     expect(r.config.combat.criticalHits).toBe(false);
     expect(r.config.results.drawWindow).toBe(0);
@@ -140,12 +142,15 @@ describe('v0.3 stat mapping and blade exposure', () => {
 
   it('defense no longer feeds stability or impact spin resistance; stamina and tips do', () => {
     const tempest = getTop('tempest');
-    const base = deriveTopPhysics(tempest);
-    const def = deriveTopPhysics(tempest, { stats: { ...tempest.stats, defense: 100 } });
+    // v0.3 / v0.4.0 mapping (v0.4.1 keeps the same defense rule; its Zephyr Halo values are tested in v041.test.ts).
+    const base = deriveTopPhysics(tempest, { ruleset: 'v0.3' });
+    const def = deriveTopPhysics(tempest, { ruleset: 'v0.3', stats: { ...LEGACY_V040_STATS.tempest!, defense: 100 } });
+    const cur = deriveTopPhysics(tempest);
+    expect(deriveTopPhysics(tempest, { stats: { ...tempest.stats, defense: 100 } }).stability).toBe(cur.stability);
     expect(def.stability).toBe(base.stability);
     expect(def.impactSpinResist).toBe(base.impactSpinResist);
     expect(def.restitution).toBeLessThan(base.restitution);
-    const sta = deriveTopPhysics(tempest, { stats: { ...tempest.stats, stamina: 100 } });
+    const sta = deriveTopPhysics(tempest, { ruleset: 'v0.3', stats: { ...LEGACY_V040_STATS.tempest!, stamina: 100 } });
     expect(sta.impactSpinResist).toBeGreaterThan(base.impactSpinResist);
     expect(base.bladeExposure).toBe(0.37);
     expect(deriveTopPhysics(getTop('inferno')).bladeExposure).toBe(1);

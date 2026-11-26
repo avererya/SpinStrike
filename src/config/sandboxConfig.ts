@@ -20,13 +20,16 @@ import {
   type TopLaunch,
 } from '../sim/launch';
 import type { GameplayStats } from '../content/stats';
-import type { CollisionParamKey, CombatParamKey, StadiumParamKey, TopOverrideKey } from './params';
+import type { CollisionParamKey, CombatParamKey, MovementParamKey, StadiumParamKey, TopOverrideKey } from './params';
+import { DEFAULT_AI_AIM, DEFAULT_AIM, DEFAULT_LAUNCH_VARIATION, aiAim, clampAim, type AiAimProfile, type LaunchAim } from '../sim/launchGeometry';
+import { RNG_STREAM, hashKey } from '../sim/rng';
 
 /**
  * Current configuration format.
- *   1 = SpinStrike v0.1, 2 = v0.2 (both migrated on import), 3 = v0.3.
+ *   1 = SpinStrike v0.1, 2 = v0.2 (both migrated on import),
+ *   3 = v0.3 – v0.4.0 (migrated: movement variability off), 4 = v0.4.1.
  */
-export const CONFIG_VERSION = 3;
+export const CONFIG_VERSION = 4;
 
 export type TopOverrides = Partial<Record<TopOverrideKey, number>>;
 
@@ -67,6 +70,39 @@ export interface LaunchConfig {
   zones: LaunchZones;
   bonuses: LaunchBonuses;
   aiDistribution: LaunchDistribution;
+  /** v0.4.1: the player's launch aim (heading offset and release tilt, degrees). */
+  playerAim: LaunchAim;
+  /** v0.4.1: opponent aim; 'auto' = seeded AI aim from `aiAim`. */
+  opponentAim: LaunchAim | 'auto';
+  /** v0.4.1: AI aiming behaviour. */
+  aiAim: AiAimProfile;
+}
+
+/** v0.4.1 movement variability (see MOVEMENT_PARAMS). */
+export type MovementConfig = Record<MovementParamKey, number> & {
+  /** Master switch: off = v0.4.0 launch (no aim), perfect floor, steady tip contact. */
+  naturalVariation: boolean;
+};
+
+export function defaultMovementConfig(): MovementConfig {
+  const v = DEFAULT_LAUNCH_VARIATION;
+  return {
+    naturalVariation: true,
+    positionVariation: v.position,
+    radiusVariation: v.radius,
+    headingVariation: v.heading,
+    speedVariation: v.speed,
+    tiltVariation: v.tilt,
+    energyVariation: v.energy,
+    floorRelief: 0.00015,
+    floorFrictionVariation: 0.05,
+    contactWanderScale: 1,
+  };
+}
+
+/** The v0.4.0 movement model (no variability). */
+export function legacyMovementConfig(): MovementConfig {
+  return { ...defaultMovementConfig(), naturalVariation: false, floorRelief: 0, floorFrictionVariation: 0, contactWanderScale: 0 };
 }
 
 export interface ResultConfig {
@@ -87,6 +123,8 @@ export interface SandboxConfig {
   collision: Record<CollisionParamKey, number>;
   combat: Record<CombatParamKey, number> & { knockouts: boolean; criticalHits: boolean };
   launch: LaunchConfig;
+  /** v0.4.1 natural movement variability. */
+  movement: MovementConfig;
   results: ResultConfig;
   presentation: PresentationConfig;
   player: TopSlotConfig;
@@ -130,6 +168,9 @@ export function defaultLaunchConfig(): LaunchConfig {
     zones: { ...DEFAULT_LAUNCH_ZONES },
     bonuses: { ...DEFAULT_LAUNCH_BONUSES },
     aiDistribution: { ...DEFAULT_AI_LAUNCH_DISTRIBUTION },
+    playerAim: { ...DEFAULT_AIM },
+    opponentAim: 'auto',
+    aiAim: { direction: { ...DEFAULT_AI_AIM.direction }, tilt: { ...DEFAULT_AI_AIM.tilt } },
   };
 }
 
@@ -143,6 +184,30 @@ export const V03_COLLISION = {
   energyLoss: 0.59,
   statSpinDrainWeight: 0.63,
 } as const;
+
+/** v0.4.0 collision values (frozen for the baseline path). */
+export const V040_COLLISION = { restitution: 0.6, energyLoss: 0.59, statSpinDrainWeight: 0.63 } as const;
+/** v0.4.0 combat values (frozen for the baseline path). */
+export const V040_COMBAT: CombatParams = Object.freeze({
+  damageScale: 54,
+  impactScale: 1,
+  rotationalContribution: 9.4,
+  energyReference: 0.005,
+  severityExponent: 0.4,
+  severityCap: 2.45,
+  attackReference: 65,
+  defenseEffectiveness: 0.5,
+  defenseReference: 100,
+  minImpactSpeed: 0.03,
+  rearmDistance: 0.001,
+  rearmTime: 0.08,
+  knockouts: true,
+  rimClimbEfficiency: 0.8,
+  impactLift: 0.7,
+  liftWindow: 0.25,
+  stabilityLipFactor: 0.5,
+  criticalHits: true,
+});
 
 export const DEFAULT_DRAW_WINDOW = 0.1;
 export const DEFAULT_NARROW_THRESHOLD = 0.02;
@@ -162,6 +227,7 @@ export function defaultConfig(seed = 1): SandboxConfig {
     collision: { ...V03_COLLISION },
     combat: defaultCombatConfig(),
     launch: defaultLaunchConfig(),
+    movement: defaultMovementConfig(),
     results: { drawWindow: DEFAULT_DRAW_WINDOW, narrowThreshold: DEFAULT_NARROW_THRESHOLD },
     presentation: { cinematicFinishes: true, damageNumbers: false, criticalEffects: true },
     player: { topId: STARTER_TOPS[0]!.id, overrides: {} },
@@ -185,6 +251,7 @@ export function legacyV02Config(seed = 1): SandboxConfig {
   c.launch.playerQuality = 'poor';
   c.launch.opponentQuality = 'poor';
   c.results.drawWindow = 0;
+  c.movement = legacyMovementConfig();
   return c;
 }
 
@@ -249,6 +316,12 @@ export function autoLaunches(c: SandboxConfig, playerQuality?: LaunchQuality): [
   return [player, pick(L.opponentQuality, 1)];
 }
 
+/** Launch aims of both slots: the player's aim and the fixed or seeded AI opponent aim. */
+export function resolveAims(c: SandboxConfig): [LaunchAim, LaunchAim] {
+  const o = c.launch.opponentAim;
+  return [clampAim(c.launch.playerAim), o === 'auto' ? aiAim(c.seed, 1, c.launch.aiAim) : clampAim(o)];
+}
+
 /**
  * Builds everything the simulation needs from a sandbox config. `launches`
  * overrides the automatically decided launches (the player's minigame result,
@@ -261,11 +334,19 @@ export function buildBattleOptions(c: SandboxConfig, launches?: readonly TopLaun
     surfaceFriction: c.stadium.surfaceFriction,
     wallRestitution: c.stadium.wallRestitution,
     wallHeight: c.stadium.rimLipHeight,
+    relief:
+      c.movement.naturalVariation && (c.movement.floorRelief > 0 || c.movement.floorFrictionVariation > 0)
+        ? { amplitude: c.movement.floorRelief, frictionVariation: c.movement.floorFrictionVariation, seed: hashKey(RNG_STREAM.floor, c.seed >>> 0) }
+        : undefined,
   });
   const ls = launches ?? autoLaunches(c);
+  const mv = c.movement;
+  const scaleWander = (p: TopPhysicsParams): TopPhysicsParams =>
+    mv.naturalVariation ? { ...p, contactWander: (p.contactWander ?? 0) * mv.contactWanderScale } : { ...p, contactWander: 0 };
   return {
     stadium,
-    tops: [resolveTopParams(c.player, c.ruleset), resolveTopParams(c.opponent, c.ruleset)],
+    tops: [scaleWander(resolveTopParams(c.player, c.ruleset)), scaleWander(resolveTopParams(c.opponent, c.ruleset))],
+    aims: resolveAims(c),
     topCombat: [resolveTopCombat(c.player, c.ruleset), resolveTopCombat(c.opponent, c.ruleset)],
     collision: {
       restitution: c.collision.restitution,
@@ -273,7 +354,19 @@ export function buildBattleOptions(c: SandboxConfig, launches?: readonly TopLaun
       statSpinDrainWeight: c.collision.statSpinDrainWeight,
     },
     combat: combatParamsOf(c),
-    launch: DEFAULT_LAUNCH,
+    launch: mv.naturalVariation
+      ? {
+          ...DEFAULT_LAUNCH,
+          variation: {
+            position: mv.positionVariation,
+            radius: mv.radiusVariation,
+            heading: mv.headingVariation,
+            speed: mv.speedVariation,
+            tilt: mv.tiltVariation,
+            energy: mv.energyVariation,
+          },
+        }
+      : DEFAULT_LAUNCH,
     seed: c.seed,
     stepHz: DEFAULT_STEP_HZ,
     maxDuration: c.maxDuration,
@@ -282,4 +375,20 @@ export function buildBattleOptions(c: SandboxConfig, launches?: readonly TopLaun
     drawWindow: c.results.drawWindow,
     narrowThreshold: c.results.narrowThreshold,
   };
+}
+
+/**
+ * The v0.4.0 game as a v0.4.1 configuration: 'v0.3' ruleset (v0.4.0 stats
+ * and mapping), v0.4.0 collision and combat values, and the v0.4.0 launch /
+ * movement model (no variability, no aim). Reproduces v0.4.0 battles
+ * exactly (tests/v041.test.ts) and is the baseline of every comparison in
+ * docs/COMBAT_DYNAMICS_v0.4.1.md.
+ */
+export function legacyV040Config(seed = 1): SandboxConfig {
+  const c = defaultConfig(seed);
+  c.ruleset = 'v0.3';
+  c.collision = { ...V040_COLLISION };
+  c.combat = combatConfigFrom(V040_COMBAT);
+  c.movement = legacyMovementConfig();
+  return c;
 }

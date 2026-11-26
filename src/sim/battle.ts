@@ -2,6 +2,7 @@ import { World, type WorldOptions } from './world';
 import type { FinishKind } from './combat';
 import type { TopBody } from './body';
 import type { TopLaunch } from './launch';
+import { clampAim, type LaunchAim } from './launchGeometry';
 
 /**
  * Battle phases:
@@ -71,6 +72,8 @@ export interface BattleResult {
   readonly launches: readonly TopLaunch[];
   /** Present when a spin finish opened the draw window. */
   readonly drawWindow: DrawWindowInfo | null;
+  /** v0.4.1: launch aim of each top (null under the v0.4.0 launch model, which has no aim). */
+  readonly aims: readonly LaunchAim[] | null;
 }
 
 export interface BattleOptions extends WorldOptions {
@@ -278,6 +281,7 @@ export class Battle {
       strongestHit: Object.freeze(best),
       launches: this.launches,
       drawWindow: dw ? Object.freeze(dw) : null,
+      aims: this.options.launch.variation ? Object.freeze(this.world.bodies.map((b) => Object.freeze(clampAim(this.options.aims?.[b.index])))) : null,
     });
   }
 

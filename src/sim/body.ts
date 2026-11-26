@@ -37,6 +37,16 @@ export class TopBody {
   leanX = 0;
   leanY = 0;
 
+  // --- contact wander (v0.4.1) ---
+  /**
+   * Seeded angular frequencies (rad/s) and phases of this top's contact
+   * wander: three incommensurate components per axis. Null = no wander
+   * (v0.4.0 behaviour). Set at launch from the battle seed.
+   */
+  wander: { f: number[]; ph: number[] } | null = null;
+  /** Simulated time seen by this body's free motion, s (drives the wander). */
+  wanderT = 0;
+
   // --- derived constants ---
   readonly inertia: number;
   readonly invMass: number;

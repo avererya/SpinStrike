@@ -372,7 +372,7 @@ function recordRow(r: BattleRecord): HTMLElement {
   return el('li', { class: `rec ${r.result}` }, [
     el('span', { class: 'rec-res', text: res }),
     el('span', { class: 'rec-main', text: `vs ${name} · ${r.difficulty} · ${fin} · ${fmtDuration(r.duration)}` }),
-    el('span', { class: 'rec-sub', text: `Launch ${LAUNCH_QUALITY_LABEL[r.launch]} · +${r.rewards.credits} ${CREDIT} +${r.rewards.xp} XP` }),
+    el('span', { class: 'rec-sub', text: `Launch ${LAUNCH_QUALITY_LABEL[r.launch]}${r.aim ? ` · aim ${r.aim.direction > 0 ? '+' : ''}${r.aim.direction}° / ${r.aim.tilt}°` : ''} · +${r.rewards.credits} ${CREDIT} +${r.rewards.xp} XP${r.ruleset ? '' : ' · v0.4.0 rules'}` }),
   ]);
 }
 

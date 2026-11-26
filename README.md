@@ -1,9 +1,9 @@
-# SpinStrike — v0.4 Progression Foundation (on v0.3.1 combat)
+# SpinStrike — v0.4.1 Combat Dynamics & Progression Refinement
 
 SpinStrike is a browser-based, physics-driven spinning-top combat game. Tops, names and art are all original.
 **v0.4 turns the combat sandbox into a persistent progression game**: choose a starter top, battle random Bronze
 opponents in Quick Battle, earn Credits and XP, level up, buy permanent upgrades, and climb the career ranks.
-The v0.3.1 combat (launch minigame, critical hits, 0.10 s draw window, physics, balance) is unchanged; the
+v0.4.1 refines the combat dynamics and adds launch aiming (below); the
 original sandbox is kept as a separate developer mode that never touches your career.
 
 See [Progression and economy](docs/PROGRESSION.md), [Save schema](docs/SAVE_SCHEMA.md) and
@@ -18,12 +18,34 @@ Live: https://spinstrike.pages.dev/ (Cloudflare Pages, deployed from `main`).
 
 ---
 
+## v0.4.1: combat dynamics, launch aiming, refined progression
+
+Full report: [`docs/COMBAT_DYNAMICS_v0.4.1.md`](docs/COMBAT_DYNAMICS_v0.4.1.md).
+
+- **Aim your launch.** Before the timing minigame you aim on a top-down view of the stadium.
+  - Drag sideways for direction (−45…+45°, + = toward the centre) and up/down for tilt (0…30°). Sliders and ± buttons work too.
+  - The dotted line is your top's real-physics opening path (nominal launch, your top alone).
+  - Tilt costs spin and changes how hard the tip drives. There is no damage bonus.
+  - Your last aim is remembered for each top, so you can go straight to the timing.
+- **No more stalled orbits.** Battles now include small, seeded, physical variation:
+  - independent launch placement, heading, speed, tilt and energy per top
+  - a slightly uneven floor and grip
+  - tip contact that wanders more as spin falls
+
+  Identical tops no longer lock into the same orbit half a lap apart. Battles without a hit by 20 s fell from 15 % to 4.5 %.
+- **Class identities.** Titan's Attack is 55 (was 82) and Tempest's Stamina is 95 (was 75).
+- **Upgrades.** Stamina no longer compounds at high ranks. Speed is still weak; this is an open design decision.
+- **Rewards (temporary).** Difficulty multipliers are Easy 0.75, Normal 1.0, Hard 1.1, Expert 1.2.
+- **Saves.** v0.4.0 saves load unchanged. Old history is never back-filled. New records carry the ruleset and aims.
+- **Sandbox.** It has movement and aim controls and "Load v0.4.0 baseline" for exact v0.4.0 battles.
+- **Developer tools.** Dev-panel physics stats show contacts, hits, gaps and sync time. The scripts are `npm run dynamics` (`--baseline`), `npm run upgrades` and `npm run aim`.
+
 ## v0.4: the game (career mode)
 
 Primary loop: **Garage → Quick Battle → rewards → upgrade → level up → advance career → repeat.**
 
 - **Navigation:** bottom tabs Garage / Battle / Collection / Career; Settings and Sandbox are in the ☰ menu.
-- **New career:** pick Inferno, Titan, Tempest or Phantom (Common, v0.3.1 stats). Start: level 1, 500 Credits, Bronze III, Classic Arena.
+- **New career:** pick Inferno, Titan, Tempest or Phantom (Common, v0.4.1 stats). Start: level 1, 500 Credits, Bronze III, Classic Arena.
 - **Garage:** rotating 3D preview, level and XP, base vs effective stats, upgrade progress, Quick Battle / Upgrade / Top History.
 - **Upgrades:** Health, Attack, Defense, Stamina, Speed and Critical Chance, ten ranks each, gated by top level, paid with Credits.
 - **Quick Battle:** random Bronze opponent, difficulty Easy to Expert (changes AI launch quality and reward multiplier), Classic Arena. Rewards are granted once per completed battle.
@@ -434,22 +456,31 @@ Damaging hits add sparks and an impact ring scaled to damage ÷ max health. Ordi
 
 ---
 
-## Balance (v0.3.1, Classic Bowl)
+## Balance (v0.4.1, Classic Bowl)
 
-Full report: [`docs/balance/BALANCE_REPORT.md`](docs/balance/BALANCE_REPORT.md) (v0.3.1 section first). Raw runs: [`docs/balance/v0.3.1/`](docs/balance/v0.3.1/) (final seeds 1–500 and 100001–100500, plus the v0.3 code re-run at the same seeds and window for comparison; 8,000 battles each) and [`docs/balance/v0.3/`](docs/balance/v0.3/).
+Report: [`docs/COMBAT_DYNAMICS_v0.4.1.md`](docs/COMBAT_DYNAMICS_v0.4.1.md). Raw runs: [`docs/balance/v0.4.1/`](docs/balance/v0.4.1/). The v0.3.1 report is kept in [`docs/balance/BALANCE_REPORT.md`](docs/balance/BALANCE_REPORT.md).
 
-Slot-averaged win rate of the row top against the column top, **distributed launches, crits on, seeds 1–500 (100001–100500 in brackets)**:
+Win rate of the row top against the column top, averaged over both slots. Distributed launches, default player aim, seeded AI aim, 32,000 battles (seeds 100001–102000):
 
-| | Inferno | Titan | Tempest | Phantom | Target row |
+| | Inferno | Titan | Tempest | Phantom | Non-mirror overall |
 | --- | --- | --- | --- | --- | --- |
-| **Inferno** | 47 % (47) | 33 % (32) | **71 % (69)** | 43 % (40) | 35 / 65 / 50 |
-| **Titan** | 67 % (68) | 47 % (47) | 31 % (30) | 45 % (47) | 65 / 35 / 50 |
-| **Tempest** | 29 % (31) | 69 % (71) | 49 % (50) | 50 % (52) | 35 / 65 / 50 |
-| **Phantom** | 56 % (60) | 49 % (47) | 50 % (48) | 46 % (46) | 50 / 50 / 50 |
+| **Inferno** | 45 % | 40 % | **70 %** | 38 % | 49.3 % |
+| **Titan** | **58 %** | 49 % | 29 % | 59 % | 48.5 % |
+| **Tempest** | 30 % | **71 %** | 49 % | 53 % | 51.4 % |
+| **Phantom** | 59 % | 38 % | 47 % | 46 % | 48.0 % |
 
-Non-mirror overall: Inferno 49 / 47 %, Titan 48 / 48 %, Tempest 49 / 51 %, Phantom 52 / 52 %. Draws 2.3 % overall. See the report for finishes, durations and mirror fairness.
+Draws are 2.4 %. Finishes are 34 % burst, 4 % knockout and 60 % spin. The median battle is 37 s and the median first damaging hit comes at 2.7 s.
 
 ## Known limitations
+
+- **v0.4.1 open items:**
+  - Speed upgrades are slightly negative (about −3 to −5 points at rank 10).
+  - Phantom beats Inferno about 60 % and loses to Titan about 61 %.
+  - The Inferno mirror is short (about 6.5 hits).
+  - The Titan mirror's first damaging hit has a median of 18 s.
+  - The AI aim does not depend on difficulty.
+
+  See section 9 of the dynamics report. Mobile aiming was checked only in an emulated iPhone 13, not on a physical device.
 
 - **iOS top spacing is unverified on a physical iPhone.** v0.3.1 adds 20 px (16 px landscape) of clearance on iOS touch devices and fixes a CSS rule that reset the safe-area padding on narrow screens; whether the blurred band is cleared must be checked on a device after deployment.
 - **Not verified on real devices.** All screenshots use headless Chromium with software WebGL. The iOS top-of-screen changes (toolbar-coloured background, safe-area padding moved into the toolbar, no backdrop blur) are a mitigation; **the blur is not confirmed fixed** until checked on an iPhone. Cloudflare deployment was not verifiable from this environment.

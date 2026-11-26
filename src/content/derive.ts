@@ -2,7 +2,7 @@ import type { TopPhysicsParams } from '../sim/topParams';
 import { BASE_CRIT_CHANCE, BASE_CRIT_MULTIPLIER, type TopCombatStats } from '../sim/combat';
 import { lerp } from '../sim/math';
 import { CORES, DISCS, RINGS, TIPS, type CorePart, type DiscPart, type RingPart, type TipPart } from './parts';
-import { LEGACY_V02_STATS, type TopDefinition } from './tops';
+import { LEGACY_V02_STATS, LEGACY_V040_STATS, type TopDefinition } from './tops';
 import type { GameplayStats } from './stats';
 
 /**
@@ -20,9 +20,12 @@ import type { GameplayStats } from './stats';
  * Every constant below is a PROVISIONAL tuning value, not a confirmed
  * design decision. See README "Stat → physics mapping" for the table.
  */
-export type Ruleset = 'v0.2' | 'v0.3';
-export const RULESETS: readonly Ruleset[] = ['v0.3', 'v0.2'];
-export const DEFAULT_RULESET: Ruleset = 'v0.3';
+export type Ruleset = 'v0.2' | 'v0.3' | 'v0.4.1';
+/** 'v0.3' = the v0.3.1 – v0.4.0 stats and mapping (v0.4.0 baseline path). */
+export const RULESETS: readonly Ruleset[] = ['v0.4.1', 'v0.3', 'v0.2'];
+export const DEFAULT_RULESET: Ruleset = 'v0.4.1';
+/** Physics / combat ruleset id recorded in v0.4.1+ battle history. */
+export const PHYSICS_VERSION = 'v0.4.1';
 
 export interface ResolvedParts {
   core: CorePart;
@@ -44,6 +47,10 @@ export function resolveParts(def: TopDefinition): ResolvedParts {
 export function baseStats(def: TopDefinition, ruleset: Ruleset = DEFAULT_RULESET): GameplayStats {
   if (ruleset === 'v0.2') {
     const s = LEGACY_V02_STATS[def.id];
+    if (s) return { ...s };
+  }
+  if (ruleset === 'v0.3') {
+    const s = LEGACY_V040_STATS[def.id];
     if (s) return { ...s };
   }
   return { ...def.stats };
@@ -171,11 +178,84 @@ function derivePhysicsV03(s: GameplayStats, p: ResolvedParts, spinDirection: 1 |
   };
 }
 
+/**
+ * v0.4.1 mapping. Same single-responsibility split as v0.3, with three
+ * changes found in the upgrade-effectiveness investigation:
+ *
+ *   stamina → spin decay is now HYPERBOLIC in the stat: endurance factor
+ *             1 + k·stamina/100 (decay = D₀ / that). v0.3 interpolated the
+ *             decay multiplier linearly, and extrapolating it above 100
+ *             (upgrades) drove decay toward zero, so +30 % stamina could
+ *             nearly double endurance. Now endurance grows linearly.
+ *   speed   → also scales the tip's effective drive radius (how far the
+ *             contact patch moves off-axis when the top leans), which sets
+ *             the speed the tip actually drives the top around the bowl.
+ *             Launch speed alone was forgotten within ~1 s because the tip
+ *             drive relaxes velocity toward its own "rolling" speed.
+ *   tips    → rolling resistance and contact wander come from the tip part
+ *             (TipPart.v041), not a global constant.
+ */
+export const PARAMS_V041 = {
+  ...PARAMS_V03,
+  /** spinDecay = decayBase / (1 + decayGain·stamina/100). */
+  decayBase: 2,
+  decayGain: 1.6667,
+  /** Tip drive radius multiplier from speed. */
+  driveRadius: [0.85, 1.15] as const,
+  /** Tip traction multiplier from speed. */
+  traction: [0.85, 1.2] as const,
+  launchSpeed: [0.3, 1.1] as const,
+  impactSpinResist: [0, 0.4] as const,
+  impactSpinDrain: [0.6, 1.3] as const,
+};
+
+function derivePhysicsV041(s: GameplayStats, p: ResolvedParts, spinDirection: 1 | -1): TopPhysicsParams {
+  const { ring, disc, tip } = p;
+  const P = PARAMS_V041;
+  const tv = tip.v041;
+  const rv = ring.v041 ?? {};
+  const tipStability = tv?.stability ?? tip.stability ?? 0.5;
+  const stability = Math.min(0.95, Math.max(0.05, tipStability + lerp(P.stabilityWeight[0], P.stabilityWeight[1], tUp(s.weight))));
+  return {
+    mass: lerp(0.03, 0.058, tUp(s.weight)),
+    radius: ring.radius,
+    gyration: disc.gyration,
+    comHeight: 0.016,
+    contactHeight: 0.021,
+    tipDriveRadius: (tv?.driveRadius ?? tip.driveRadius) * lerp(P.driveRadius[0], P.driveRadius[1], tUp(s.speed)),
+    axisSettleRate: tv?.axisSettleRate ?? 0,
+    tipTraction: (tv?.traction ?? tip.traction) * lerp(P.traction[0], P.traction[1], tUp(s.speed)),
+    tipSpinFriction: tv?.spinFriction ?? tip.spinFrictionV03 ?? tip.spinFriction,
+    tipSpinRadius: tv?.spinRadius ?? tip.spinRadius,
+    airDrag: 4e-9,
+    spinDecay: P.decayBase / (1 + (P.decayGain * Math.min(STAT_MAPPING_CEILING, Math.max(0, s.stamina))) / 100),
+    rollingResistance: tv?.rollingResistance ?? 0.08,
+    stability,
+    baseWobble: tv?.rock ?? tip.rock,
+    wobbleIntensity: 0.35,
+    restitution: lerp(P.restitution[0], P.restitution[1], tUp(s.defense)),
+    contactFriction: lerp(P.contactFriction[0], P.contactFriction[1], tUp(s.attack)) * (rv.frictionFactor ?? ring.frictionFactor),
+    ringStrike: (rv.strike ?? ring.strikeV03 ?? ring.strike) * lerp(P.ringStrike[0], P.ringStrike[1], tUp(s.attack)),
+    bladeExposure: rv.bladeExposure ?? ring.bladeExposure ?? 1,
+    impactSpinLossFactor: rv.impactSpinLossFactor ?? ring.impactSpinLossFactor ?? 1,
+    damageCapFactor: rv.damageCapFactor ?? ring.damageCapFactor ?? 1,
+    impactSpinDrain: lerp(P.impactSpinDrain[0], P.impactSpinDrain[1], tUp(s.attack)),
+    impactSpinResist: lerp(P.impactSpinResist[0], P.impactSpinResist[1], tUp(s.stamina)),
+    contactWander: tv?.contactWander ?? 0,
+    wanderSpinGain: tv?.wanderSpinGain ?? 0,
+    spinDirection,
+    launchSpinEnergy: BASE_LAUNCH_SPIN_ENERGY,
+    launchSpeed: lerp(P.launchSpeed[0], P.launchSpeed[1], tUp(s.speed)),
+  };
+}
+
 export function deriveTopPhysics(def: TopDefinition, opts: DeriveOptions = {}): TopPhysicsParams {
   const ruleset = opts.ruleset ?? DEFAULT_RULESET;
   const stats = opts.stats ?? baseStats(def, ruleset);
   const parts = resolveParts(def);
-  return ruleset === 'v0.2' ? derivePhysicsV02(stats, parts, def.spinDirection) : derivePhysicsV03(stats, parts, def.spinDirection);
+  if (ruleset === 'v0.2') return derivePhysicsV02(stats, parts, def.spinDirection);
+  if (ruleset === 'v0.3') return derivePhysicsV03(stats, parts, def.spinDirection);
+  return derivePhysicsV041(stats, parts, def.spinDirection);
 }
 
 /** Health points per point of the health stat (confirmed: 10 × health stat). */

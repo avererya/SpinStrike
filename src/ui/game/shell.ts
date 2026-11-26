@@ -256,6 +256,7 @@ export class GameShell implements GameContext {
       onFinished: (result) => this.settle(setup, result),
       onAgain: () => this.launchCareerBattle(this.difficulty),
       onExit: () => this.go({ name: 'garage' }),
+      onAim: (aim) => this.store.setLaunchAim(top.instanceId, aim),
     };
     const opp = getTop(setup.opponent.topId);
     stage.startCareerBattle(setup, config, hooks, `${DIFFICULTY_LABEL[difficulty]} · ${opponentRankLabel(setup)} · vs ${opp.name}`);

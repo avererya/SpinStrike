@@ -6,6 +6,7 @@ import {
   LAUNCH_BONUS_PARAMS,
   LAUNCH_PARAMS,
   LAUNCH_ZONE_PARAMS,
+  MOVEMENT_PARAMS,
   RESULT_PARAMS,
   SIM_LIMITS,
   STADIUM_PARAMS,
@@ -13,13 +14,14 @@ import {
   TOP_PARAMS,
   type ParamSpec,
 } from '../config/params';
-import { defaultConfig, legacyV02Config, resolveTopCombat, resolveTopParams, type FixedQuality, type SandboxConfig } from '../config/sandboxConfig';
+import { defaultConfig, legacyV02Config, legacyV040Config, resolveTopCombat, resolveTopParams, type FixedQuality, type SandboxConfig } from '../config/sandboxConfig';
 import { RULESETS, type Ruleset } from '../content/derive';
 import { LAUNCH_QUALITIES, LAUNCH_QUALITY_LABEL, type LaunchQuality } from '../sim/launch';
 import { BUILD_ID, BUILD_TIME, VERSION_LABEL } from '../version';
 import { parseConfigJson } from '../config/validate';
 import type { DebugFlags } from '../render/debugDraw';
 import { el } from './dom';
+import { AIM_LIMITS, DEFAULT_AI_AIM, DEFAULT_AIM, aiAim } from '../sim/launchGeometry';
 
 export interface DevPanelCallbacks {
   /** Config was edited. Battle should be rebuilt with it (not auto-started). */
@@ -86,7 +88,7 @@ export class DevPanel {
     const L = config.launch;
     const ruleset = this.select(
       'Ruleset (stats & stat → physics mapping)',
-      RULESETS.map((r) => ({ value: r, label: r === 'v0.2' ? 'v0.2 legacy' : `${r} (current)` })),
+      RULESETS.map((r) => ({ value: r, label: r === 'v0.2' ? 'v0.2 legacy' : r === 'v0.3' ? 'v0.3 / v0.4.0 baseline' : `${r} (current)` })),
       config.ruleset,
       (v) => {
         config.ruleset = v as Ruleset;
@@ -102,7 +104,17 @@ export class DevPanel {
       this.commit();
       this.flash('Legacy v0.2 configuration loaded.');
     });
-    b.append(this.section('Ruleset', [ruleset, el('div', { class: 'btn-row' }, [legacyBtn])]));
+    const v040Btn = el('button', { class: 'btn small', text: 'Load v0.4.0 baseline', title: 'v0.4.0 stats, stat mapping, collision/combat values and launch model (no aim, no movement variation): reproduces v0.4.0 battles' });
+    v040Btn.addEventListener('click', () => {
+      const d = legacyV040Config(this.config.seed);
+      d.player.topId = this.config.player.topId;
+      d.opponent.topId = this.config.opponent.topId;
+      this.config = d;
+      this.commit();
+      this.flash('v0.4.0 baseline configuration loaded.');
+    });
+    b.append(this.section('Ruleset', [ruleset, el('div', { class: 'btn-row' }, [v040Btn, legacyBtn])]));
+    b.append(this.section('Movement variation & launch aim (v0.4.1)', this.movementControls()));
     const qOptions = (auto: string) => [
       { value: 'auto', label: auto },
       ...LAUNCH_QUALITIES.map((q) => ({ value: q, label: `${LAUNCH_QUALITY_LABEL[q]} (${config.launch.bonuses[q]}×)` })),
@@ -199,7 +211,7 @@ export class DevPanel {
           return row;
         }),
         ...TOP_PARAMS.map((s) => {
-          const row = this.slider(s, eff[s.key], (v) => (slot.overrides[s.key] = v));
+          const row = this.slider(s, eff[s.key] ?? 0, (v) => (slot.overrides[s.key] = v));
           if (slot.overrides[s.key] !== undefined) row.classList.add('overridden');
           return row;
         }),
@@ -245,6 +257,55 @@ export class DevPanel {
         this.messages,
       ]),
     );
+  }
+
+  private movementControls(): Node[] {
+    const config = this.config;
+    const M = config.movement;
+    const L = config.launch;
+    const aimSlider = (label: string, key: 'direction' | 'tilt', get: () => number, set: (v: number) => void) =>
+      this.slider({ key, label, min: AIM_LIMITS[key].min, max: AIM_LIMITS[key].max, step: 1, unit: '°', help: key === 'direction' ? '+ = toward the centre, − = away.' : 'Release tilt of the spin axis.' }, get(), set);
+    const pa = L.playerAim;
+    const oppAuto = L.opponentAim === 'auto';
+    const oa = oppAuto ? aiAim(config.seed, 1, L.aiAim) : L.opponentAim as { direction: number; tilt: number };
+    const rows: Node[] = [
+      el('p', { class: 'dev-note', text: 'Seeded, physically plausible variability. Off = v0.4.0 launch model (no aim), perfect floor and steady tip contact. Each component uses its own keyed random stream.' }),
+      this.checkbox('Natural movement variation (and launch aim)', M.naturalVariation, (v) => {
+        M.naturalVariation = v;
+        this.commit();
+      }),
+      ...MOVEMENT_PARAMS.map((sp) => this.slider(sp, M[sp.key], (v) => (M[sp.key] = v))),
+      el('p', { class: 'dev-note', text: 'Player aim (the aim screen before the timing minigame edits it too).' }),
+      aimSlider('Player direction', 'direction', () => pa.direction, (v) => (pa.direction = Math.round(v))),
+      aimSlider('Player tilt', 'tilt', () => pa.tilt, (v) => (pa.tilt = Math.round(v))),
+      this.checkbox(`Opponent aim: AI (seeded) · this seed: ${oa.direction > 0 ? '+' : ''}${oa.direction}° / ${oa.tilt}°`, oppAuto, (v) => {
+        L.opponentAim = v ? 'auto' : { ...oa };
+        this.commit();
+      }),
+    ];
+    if (!oppAuto) {
+      const o = L.opponentAim as { direction: number; tilt: number };
+      rows.push(
+        aimSlider('Opponent direction', 'direction', () => o.direction, (v) => (o.direction = Math.round(v))),
+        aimSlider('Opponent tilt', 'tilt', () => o.tilt, (v) => (o.tilt = Math.round(v))),
+      );
+    }
+    const range = (label: string, key: 'direction' | 'tilt', end: 'min' | 'max') =>
+      this.slider({ key, label, min: AIM_LIMITS[key].min, max: AIM_LIMITS[key].max, step: 1, unit: '°', help: 'Range of the seeded AI aim (uniform).' }, L.aiAim[key][end], (v) => {
+        const r = L.aiAim[key];
+        r[end] = Math.round(v);
+        if (r.min > r.max) end === 'min' ? (r.max = r.min) : (r.min = r.max);
+      });
+    rows.push(range('AI direction min', 'direction', 'min'), range('AI direction max', 'direction', 'max'), range('AI tilt min', 'tilt', 'min'), range('AI tilt max', 'tilt', 'max'));
+    const resetAim = el('button', { class: 'btn small', text: 'Reset aims' });
+    resetAim.addEventListener('click', () => {
+      L.playerAim = { ...DEFAULT_AIM };
+      L.opponentAim = 'auto';
+      L.aiAim = { direction: { ...DEFAULT_AI_AIM.direction }, tilt: { ...DEFAULT_AI_AIM.tilt } };
+      this.commit();
+    });
+    rows.push(el('div', { class: 'btn-row' }, [resetAim]));
+    return rows;
   }
 
   private section(title: string, children: Node[]): HTMLElement {

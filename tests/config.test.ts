@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildBattleOptions, defaultConfig, legacyV02Config, resolveTopParams } from '../src/config/sandboxConfig';
+import { CONFIG_VERSION, buildBattleOptions, defaultConfig, legacyV02Config, resolveTopParams } from '../src/config/sandboxConfig';
 import { parseConfigJson, validateConfig } from '../src/config/validate';
 import { deriveTopPhysics } from '../src/content/derive';
 import { STARTER_TOPS } from '../src/content/tops';
@@ -88,7 +88,7 @@ describe('v0.2/v0.3 configuration', () => {
     if (!r.ok) return;
     // v0.3: v0.1/v0.2 files migrate to the legacy v0.2 ruleset with the new mechanics off.
     const d = legacyV02Config(0);
-    expect(r.config.version).toBe(3);
+    expect(r.config.version).toBe(CONFIG_VERSION);
     expect(r.config.ruleset).toBe('v0.2');
     expect(r.config.combat.criticalHits).toBe(false);
     expect(r.config.results.drawWindow).toBe(0);
@@ -135,7 +135,7 @@ describe('v0.2/v0.3 configuration', () => {
 
   it('rejects unknown versions', () => {
     const c = defaultConfig(1) as unknown as Record<string, any>;
-    c.version = 4;
+    c.version = 5;
     expect(validateConfig(c).ok).toBe(false);
     c.version = 0;
     expect(validateConfig(c).ok).toBe(false);

@@ -1,3 +1,5 @@
+> **v0.4.1:** current balance, stats and entertainment metrics are in [`../COMBAT_DYNAMICS_v0.4.1.md`](../COMBAT_DYNAMICS_v0.4.1.md), with raw runs in [`v0.4.1/`](v0.4.1/). The sections below describe v0.3.1 and are kept for history; v0.3.1 balance is reproducible in the sandbox with "Load v0.4.0 baseline".
+
 # SpinStrike v0.3.1 balance report (Classic Bowl)
 
 Method: `npm run sim -- --seed 1` and `--seed 100001` (16 ordered matchups × 500 seeds = 8,000 battles per set, **16,000 total**, distributed launches, crits on, 0 failures, 0 timeouts). Raw reports: [`v0.3.1/`](v0.3.1/). The v0.3 code was re-run on the same seeds with the same 0.10 s window (`baseline-v0.3-window0.1-*`) so the comparison isolates the Tempest change. Candidates were found by sweeping in memory with `scripts/tune-eval.ts` on seeds 500001+ (150–400 seeds), separate from the validation sets.

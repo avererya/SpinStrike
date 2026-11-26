@@ -1,4 +1,4 @@
-# Career save schema (v0.4, schemaVersion 1)
+# Career save schema (v0.4 / v0.4.1, schemaVersion 1)
 
 Code: `src/career/save.ts` (types, validation, migration), `src/career/store.ts` (persistence), `src/career/history.ts` (statistics).
 
@@ -21,14 +21,24 @@ CareerSave {
   tops: OwnedTop[] }
 OwnedTop { instanceId, definitionId, rarity, acquiredAt, level, xp, lifetimeXp,
   upgrades { health, attack, defense, stamina, speed, critChance: 0-10 },
-  stats: TopStats, equipment {} (reserved), cosmetics {} (reserved) }
+  stats: TopStats, equipment {} (reserved), cosmetics {} (reserved),
+  launchAim? { direction: -45..45, tilt: 0..30 } (v0.4.1, optional) }
 TopStats { battles, wins, losses, draws, streak, bestStreak, winsByFinish, lossesByFinish,
   fastestWin, longestBattle, damageDealt, damageReceived, critsLanded, creditsEarned, xpEarned,
   launches{poor..perfect}, vsClass{}, vsTop{}, byStadium{} (Tally each), recent: BattleRecord[<=100] }
 BattleRecord { id, at, seed, stadiumId, difficulty, playerRankId, opponent{topId,topClass,rankId,ranks},
-  result, finish, duration, launch, opponentLaunch, damageDealt, damageReceived, crits, rewards{credits,xp} }
+  result, finish, duration, launch, opponentLaunch, damageDealt, damageReceived, crits, rewards{credits,xp},
+  ruleset? (v0.4.1+), aim? {direction,tilt} (v0.4.1+), opponentAim? {direction,tilt} (v0.4.1+) }
 ```
 Instance ids (`top_*`, `battle_*`) are unique; definition ids (`inferno`) reference content. New tops, stadiums and equipment add keys, not schema changes.
+
+## v0.4.1 additions (no schema change)
+All three additions are **optional fields**, so the schema stays at version 1 and v0.4.0 saves load unchanged:
+- `OwnedTop.launchAim`: the player's last confirmed launch aim with that top. Absent until the player first aims. Invalid values are dropped on load.
+- `BattleRecord.ruleset`: the physics/stat ruleset the battle was played under (`'v0.4.1'`). Written for new records only. Records from v0.4.0 have no `ruleset` and are **never back-filled**, because we cannot know for certain how they were played; an absent ruleset means "v0.4.0 or earlier".
+- `BattleRecord.aim` / `opponentAim`: both tops' launch aims. New records only.
+
+Effective stats are not stored: they are recalculated from `upgrades` and the current base stats whenever needed, so v0.4.0 tops get v0.4.1 base stats with their ranks unchanged. Historical records (durations, damage, rewards) are left exactly as they were.
 
 ## Loading
 raw JSON, then `migrateSave` (applies `MIGRATIONS[n]` for each n up to the current version; a save from a newer schema is refused and left untouched), then `validateSave` (sanitises: clamps levels/ranks/XP, drops unknown tops, repairs the active top and rank, bounds recent history; no valid top is a fatal error). Problems are reported as warnings in Settings. If the main save is unreadable the backup is restored and the bad data is kept under the corrupt key.

@@ -34,6 +34,31 @@ export interface TipPart {
   /** Visual: tip contact radius and length, m. */
   visualRadius: number;
   visualLength: number;
+  /**
+   * v0.4.1 ruleset tip behaviour (reusable physical properties; any top
+   * wearing this tip gets them). Values here replace the v0.3 values above
+   * for the v0.4.1 ruleset only, so v0.4.0 battles stay reproducible.
+   */
+  v041?: {
+    driveRadius?: number;
+    traction?: number;
+    spinFriction?: number;
+    spinRadius?: number;
+    rock?: number;
+    stability?: number;
+    /** Translational rolling resistance, 1/s. High = settles toward the centre (ball tips). */
+    rollingResistance: number;
+    /** RMS contact wander, rad (see TopPhysicsParams.contactWander). */
+    contactWander: number;
+    /** Growth of contact wander as spin runs down. */
+    wanderSpinGain: number;
+    /**
+     * Rate at which the spin axis re-aligns with the local surface normal,
+     * 1/s (gyroscopic self-righting of the tip). High = the tip stops
+     * "steering" along the slope and the top recovers to the centre.
+     */
+    axisSettleRate?: number;
+  };
 }
 
 export type RingStyle = 'jagged' | 'armored' | 'smooth' | 'winged';
@@ -58,6 +83,8 @@ export interface RingPart {
   damageCapFactor?: number;
   /** Number of blades / lobes for the procedural model. */
   lobes: number;
+  /** v0.4.1 ruleset overrides of this ring's physical values. */
+  v041?: { frictionFactor?: number; strike?: number; bladeExposure?: number; impactSpinLossFactor?: number; damageCapFactor?: number };
 }
 
 export interface DiscPart {
@@ -90,6 +117,7 @@ export const TIPS: Record<string, TipPart> = {
     rock: 0.12,
     visualRadius: 0.0055,
     visualLength: 0.011,
+    v041: { rollingResistance: 0.05, contactWander: 0.04, wanderSpinGain: 1 },
   },
   'bastion-ball': {
     id: 'bastion-ball',
@@ -104,6 +132,7 @@ export const TIPS: Record<string, TipPart> = {
     rock: 0.03,
     visualRadius: 0.0045,
     visualLength: 0.01,
+    v041: { rollingResistance: 0.5, contactWander: 0.04, wanderSpinGain: 0.6, axisSettleRate: 1.5 },
   },
   'needle-point': {
     id: 'needle-point',
@@ -118,6 +147,7 @@ export const TIPS: Record<string, TipPart> = {
     rock: 0.012,
     visualRadius: 0.0012,
     visualLength: 0.012,
+    v041: { rollingResistance: 0.12, contactWander: 0.025, wanderSpinGain: 0.5 },
   },
   'vector-semi': {
     id: 'vector-semi',
@@ -131,13 +161,28 @@ export const TIPS: Record<string, TipPart> = {
     rock: 0.06,
     visualRadius: 0.0038,
     visualLength: 0.011,
+    v041: { rollingResistance: 0.1, contactWander: 0.035, wanderSpinGain: 0.8 },
   },
 };
 
 export const RINGS: Record<string, RingPart> = {
   'blaze-fang': { id: 'blaze-fang', name: 'Blaze Fang', style: 'jagged', radius: 0.025, frictionFactor: 1.25, strike: 0.014, strikeV03: 0.0176, lobes: 6 },
   'aegis-wall': { id: 'aegis-wall', name: 'Aegis Wall', style: 'armored', radius: 0.026, frictionFactor: 0.7, strike: 0.004, lobes: 8 },
-  'zephyr-halo': { id: 'zephyr-halo', name: 'Zephyr Halo', style: 'smooth', radius: 0.0245, frictionFactor: 0.6, strike: 0.002, bladeExposure: 0.37, damageCapFactor: 0.45, impactSpinLossFactor: 1.5, lobes: 12 },
+  'zephyr-halo': {
+    id: 'zephyr-halo',
+    name: 'Zephyr Halo',
+    style: 'smooth',
+    radius: 0.0245,
+    frictionFactor: 0.6,
+    strike: 0.002,
+    bladeExposure: 0.37,
+    damageCapFactor: 0.45,
+    impactSpinLossFactor: 1.5,
+    lobes: 12,
+    // v0.4.1: weaker structural protection (Tempest must stay vulnerable to
+    // aggressive structural damage) and less spin scrub on glancing contact.
+    v041: { bladeExposure: 0.55, damageCapFactor: 0.7, impactSpinLossFactor: 1.3 },
+  },
   'eclipse-wing': { id: 'eclipse-wing', name: 'Eclipse Wing', style: 'winged', radius: 0.025, frictionFactor: 1, strike: 0.008, lobes: 4 },
 };
 

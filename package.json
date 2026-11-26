@@ -1,7 +1,7 @@
 {
   "name": "spinstrike",
-  "version": "0.4.0",
-  "description": "SpinStrike v0.4.0 progression game",
+  "version": "0.4.1",
+  "description": "SpinStrike v0.4.1 progression game",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -9,7 +9,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc",
-    "sim": "tsx scripts/headless.ts"
+    "sim": "tsx scripts/headless.ts",
+    "dynamics": "tsx scripts/dynamics.ts",
+    "upgrades": "tsx scripts/upgrades.ts",
+    "aim": "tsx scripts/aim.ts"
   },
   "license": "UNLICENSED",
   "devDependencies": {

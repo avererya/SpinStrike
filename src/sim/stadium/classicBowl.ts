@@ -1,4 +1,46 @@
 import type { StadiumSurface, Vec2Out, WallContactOut } from './types';
+import { RNG_STREAM, keyedUniform } from '../rng';
+
+/**
+ * Floor imperfections (v0.4.1). A real stadium floor is never a perfect
+ * surface of revolution: moulding tolerances, wear, dust and a table that
+ * is not perfectly level all add slight unevenness. Modelled as a smooth,
+ * seeded micro-relief (a sum of long-wavelength surface waves) plus a
+ * matching variation of surface grip. The relief is part of the height
+ * field, so gravity on it is conservative (no energy is created); the grip
+ * variation only scales friction, which is dissipative.
+ */
+export interface FloorRelief {
+  /** RMS height of the micro-relief, m (≈ 0.2 mm; invisible at play scale). */
+  amplitude: number;
+  /** RMS relative variation of surface friction (0.06 = ±6 %). */
+  frictionVariation: number;
+  /** Seed of the relief pattern (derived from the battle seed). */
+  seed: number;
+}
+
+interface Wave {
+  kx: number;
+  ky: number;
+  phase: number;
+  amp: number;
+}
+const RELIEF_WAVES = 6;
+const RELIEF_WAVELENGTH: readonly [number, number] = [0.07, 0.2];
+
+function makeWaves(seed: number, salt: number, rms: number): Wave[] {
+  const out: Wave[] = [];
+  if (!(rms > 0)) return out;
+  const amp = rms * Math.sqrt(2 / RELIEF_WAVES);
+  for (let k = 0; k < RELIEF_WAVES; k++) {
+    const u = (c: number) => keyedUniform(RNG_STREAM.floor, seed >>> 0, salt, k, c);
+    const lambda = RELIEF_WAVELENGTH[0] + (RELIEF_WAVELENGTH[1] - RELIEF_WAVELENGTH[0]) * u(1);
+    const dir = u(2) * Math.PI * 2;
+    const kmag = (Math.PI * 2) / lambda;
+    out.push({ kx: Math.cos(dir) * kmag, ky: Math.sin(dir) * kmag, phase: u(3) * Math.PI * 2, amp });
+  }
+  return out;
+}
 
 export interface ClassicBowlParams {
   /** Radius of the playable floor (inside of the wall), metres. */
@@ -18,6 +60,8 @@ export interface ClassicBowlParams {
   wallRestitution: number;
   /** Visual wall height above the rim edge, metres. */
   wallHeight: number;
+  /** v0.4.1 floor imperfections. Undefined = perfect surface (v0.4.0). */
+  relief?: FloorRelief;
 }
 
 export const DEFAULT_CLASSIC_BOWL: ClassicBowlParams = {
@@ -53,6 +97,8 @@ export class ClassicBowl implements StadiumSurface {
   private readonly rs: number;
   private readonly rimK: number;
   private readonly fric: number;
+  private readonly hWaves: Wave[];
+  private readonly fWaves: Wave[];
 
   constructor(readonly params: ClassicBowlParams = DEFAULT_CLASSIC_BOWL) {
     this.r = params.radius;
@@ -65,6 +111,8 @@ export class ClassicBowl implements StadiumSurface {
     this.fric = params.surfaceFriction;
     this.wallRestitution = params.wallRestitution;
     this.wallHeight = params.wallHeight;
+    this.hWaves = params.relief ? makeWaves(params.relief.seed, 1, params.relief.amplitude) : [];
+    this.fWaves = params.relief ? makeWaves(params.relief.seed, 2, params.relief.frictionVariation) : [];
   }
 
   private heightR(r: number): number {
@@ -86,23 +134,34 @@ export class ClassicBowl implements StadiumSurface {
   }
 
   height(x: number, y: number): number {
-    return this.heightR(Math.sqrt(x * x + y * y));
+    let z = this.heightR(Math.sqrt(x * x + y * y));
+    for (const w of this.hWaves) z += w.amp * Math.cos(w.kx * x + w.ky * y + w.phase);
+    return z;
   }
 
   gradient(x: number, y: number, out: Vec2Out): void {
     const r = Math.sqrt(x * x + y * y);
-    if (r < 1e-9) {
-      out.x = 0;
-      out.y = 0;
-      return;
+    let gx = 0;
+    let gy = 0;
+    if (r >= 1e-9) {
+      const s = this.slopeR(r) / r;
+      gx = s * x;
+      gy = s * y;
     }
-    const s = this.slopeR(r) / r;
-    out.x = s * x;
-    out.y = s * y;
+    for (const w of this.hWaves) {
+      const d = -w.amp * Math.sin(w.kx * x + w.ky * y + w.phase);
+      gx += d * w.kx;
+      gy += d * w.ky;
+    }
+    out.x = gx;
+    out.y = gy;
   }
 
-  friction(_x: number, _y: number): number {
-    return this.fric;
+  friction(x: number, y: number): number {
+    if (this.fWaves.length === 0) return this.fric;
+    let v = 1;
+    for (const w of this.fWaves) v += w.amp * Math.cos(w.kx * x + w.ky * y + w.phase);
+    return this.fric * Math.min(1.5, Math.max(0.5, v));
   }
 
   wallContact(x: number, y: number, radius: number, out: WallContactOut): boolean {

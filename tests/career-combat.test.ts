@@ -8,6 +8,7 @@ import { UPGRADE_STATS, zeroRanks, type UpgradeRanks } from '../src/career/confi
 import { effectiveStats } from '../src/career/progression';
 import { generateOpponent } from '../src/career/opponents';
 import { getTop } from '../src/content/tops';
+import { DEFAULT_RULESET } from '../src/content/derive';
 
 const maxed = (): UpgradeRanks => Object.fromEntries(UPGRADE_STATS.map((k) => [k, 10])) as UpgradeRanks;
 
@@ -37,7 +38,9 @@ describe('career vs v0.3.1 sandbox equivalence', () => {
     expect(c.opponent.overrides).toEqual({});
     expect({ ...c, player: 0, opponent: 0, launch: 0 }).toEqual({ ...d, player: 0, opponent: 0, launch: 0 });
     expect(c.launch.aiDistribution).toEqual({ poor: 0.05, good: 0.25, great: 0.45, perfect: 0.25 });
-    expect(c.ruleset).toBe('v0.3');
+    expect(c.ruleset).toBe(DEFAULT_RULESET);
+    expect(c.movement.naturalVariation).toBe(true);
+    expect(c.launch.opponentAim).toBe('auto');
   });
   it('difficulty changes only launch distribution, never opponent stats', () => {
     const mk = (d: 'easy' | 'expert') => createBattleSetup({ battleId: 'x', seed: 1, opponentSeed: 77, difficulty: d, playerRankId: 'bronze-2', playerInstanceId: 'i', playerTopId: 'inferno' });
@@ -65,7 +68,7 @@ describe('upgrades have real combat effects', () => {
     expect(up0.tipTraction).toBeGreaterThan(bp.tipTraction);
     expect(up0.mass).toBe(bp.mass); // weight is not upgradeable
     const defUp = buildBattleOptions(buildCareerConfig(setup, { definitionId: 'titan', upgrades: { ...zeroRanks(), defense: 10 } })).topCombat![0]!;
-    expect(defUp.defense).toBeCloseTo(82 * 1.4, 6);
+    expect(defUp.defense).toBeCloseTo(90 * 1.4, 6); // v0.4.1 Titan defense 90
   });
   it('speed keeps scaling past stat 100 (no dead late ranks)', () => {
     const d = getTop('inferno');
