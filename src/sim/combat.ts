@@ -1,5 +1,6 @@
 import type { TopBody } from './body';
 import { GRAVITY } from './units';
+import { RNG_STREAM, keyedUniform } from './rng';
 
 /**
  * Combat layer (v0.2): structural damage (health), burst detection and
@@ -66,6 +67,10 @@ export interface CombatParams {
   liftWindow: number;
   /** Extra lip clearance required per unit stability (stable tops stay down). */
   stabilityLipFactor: number;
+
+  // --- critical hits (v0.3) ---
+  /** Enables critical-hit rolls on damaging impacts. Off = v0.2 damage exactly. */
+  criticalHits: boolean;
 }
 
 export const DEFAULT_COMBAT: CombatParams = {
@@ -86,6 +91,29 @@ export const DEFAULT_COMBAT: CombatParams = {
   impactLift: 0.7,
   liftWindow: 0.25,
   stabilityLipFactor: 0.5,
+  criticalHits: true,
+};
+
+/** v0.2 combat parameters, kept for the legacy ruleset and regression runs. */
+export const LEGACY_V02_COMBAT: CombatParams = {
+  damageScale: 50,
+  impactScale: 1,
+  rotationalContribution: 10,
+  energyReference: 0.005,
+  severityExponent: 0.5,
+  severityCap: 2,
+  attackReference: 65,
+  defenseEffectiveness: 0.5,
+  defenseReference: 100,
+  minImpactSpeed: 0.03,
+  rearmDistance: 0.001,
+  rearmTime: 0.08,
+  knockouts: true,
+  rimClimbEfficiency: 0.8,
+  impactLift: 0.7,
+  liftWindow: 0.25,
+  stabilityLipFactor: 0.5,
+  criticalHits: false,
 };
 
 /** A hit counts as "landed" (HUD / statistics) when it deals at least this much damage. */
@@ -96,9 +124,28 @@ export interface TopCombatStats {
   maxHealth: number;
   attack: number;
   defense: number;
+  /** Probability (0–1) that a damaging impact by this top is a critical hit (v0.3). */
+  critChance: number;
+  /** Structural-damage multiplier of this top's critical hits (v0.3). */
+  critMultiplier: number;
 }
 
-export const DEFAULT_TOP_COMBAT: TopCombatStats = { maxHealth: 650, attack: 65, defense: 65 };
+/** Base critical chance of every starter top (provisional). */
+export const BASE_CRIT_CHANCE = 0.05;
+/** Critical damage multiplier (provisional). */
+export const BASE_CRIT_MULTIPLIER = 2;
+/** Proposed future cap on upgraded critical chance (not used by the engine yet). */
+export const MAX_CRIT_CHANCE = 0.25;
+/** Proposed future critical-chance gain per upgrade level (not implemented yet). */
+export const CRIT_CHANCE_PER_UPGRADE = 0.02;
+
+export const DEFAULT_TOP_COMBAT: TopCombatStats = {
+  maxHealth: 650,
+  attack: 65,
+  defense: 65,
+  critChance: BASE_CRIT_CHANCE,
+  critMultiplier: BASE_CRIT_MULTIPLIER,
+};
 
 export type FinishKind = 'burst' | 'knockout' | 'spin';
 
@@ -147,11 +194,37 @@ export interface DamageEvent {
   ny: number;
   a: number;
   b: number;
-  /** Damage dealt to A (by B) and to B (by A). */
+  /** Damage dealt to A (by B) and to B (by A), critical multiplier included. */
   damageToA: number;
   damageToB: number;
+  /** True when the damage to A (dealt by B) / to B (dealt by A) was a critical hit. */
+  critToA: boolean;
+  critToB: boolean;
   /** Normal approach speed, m/s. */
   normalSpeed: number;
+  /** Index of this damaging impact in the battle (keys the critical rolls). */
+  impact: number;
+}
+
+export function makeDamageEvent(): DamageEvent {
+  return { step: 0, x: 0, y: 0, nx: 0, ny: 0, a: 0, b: 0, damageToA: 0, damageToB: 0, critToA: false, critToB: false, normalSpeed: 0, impact: 0 };
+}
+
+/**
+ * Critical-hit roll for one attacker in one damaging impact. Event-keyed:
+ * the uniform comes from hash(stream, seed, impact index, attacker slot),
+ * so it is independent of frame rate, simulation speed, rendering and every
+ * other random decision, and switching critical hits off leaves all other
+ * randomness untouched. Each top rolls independently.
+ */
+export function critRoll(seed: number, impact: number, attackerSlot: number): number {
+  return keyedUniform(RNG_STREAM.critical, seed >>> 0, impact >>> 0, attackerSlot >>> 0);
+}
+
+/** Resolves a critical hit: returns true when the roll succeeds. */
+export function isCritical(chance: number, roll: number): boolean {
+  const c = Number.isFinite(chance) ? Math.min(1, Math.max(0, chance)) : 0;
+  return roll < c;
 }
 
 function finite(v: number): number {
@@ -236,6 +309,8 @@ export function applyContactDamage(
   step: number,
   stepHz: number,
   out: DamageEvent,
+  seed = 0,
+  impact = 0,
 ): boolean {
   if (!r.active || r.vn <= p.minImpactSpeed) return false;
   if (A.eliminated || B.eliminated) return false;
@@ -247,12 +322,25 @@ export function applyContactDamage(
   const eA = strikeEnergy(r.vn, r.reducedMass, A.params.ringStrike, r.omegaA, A.params.radius, p);
   const eB = strikeEnergy(r.vn, r.reducedMass, B.params.ringStrike, r.omegaB, B.params.radius, p);
   // A spun-out (toppled) top no longer strikes with its blades or attacks.
-  const toB = A.spinning ? computeDamage(eA, A.combat.attack, B.combat.defense, p) : 0;
-  const toA = B.spinning ? computeDamage(eB, B.combat.attack, A.combat.defense, p) : 0;
-  if (toA <= 0 && toB <= 0) return false;
+  const baseToB = A.spinning ? computeDamage(eA, A.combat.attack, B.combat.defense, p) : 0;
+  const baseToA = B.spinning ? computeDamage(eB, B.combat.attack, A.combat.defense, p) : 0;
+  if (baseToA <= 0 && baseToB <= 0) return false;
 
-  applyHit(B, A, toB, step, r.nx, r.ny);
-  applyHit(A, B, toA, step, -r.nx, -r.ny);
+  // Critical hits (v0.3): rolled once per legitimate damaging impact, per
+  // attacker, AFTER the normal damage is known. They scale structural damage
+  // only; the impulse, spin exchange and trajectories were already resolved
+  // by the physics from the same pre-impact state and are not touched.
+  let critB = false;
+  let critA = false;
+  if (p.criticalHits) {
+    if (baseToB > 0) critB = isCritical(A.combat.critChance, critRoll(seed, impact, A.index));
+    if (baseToA > 0) critA = isCritical(B.combat.critChance, critRoll(seed, impact, B.index));
+  }
+  const toB = critB ? finite(baseToB * Math.max(1, finite(A.combat.critMultiplier))) : baseToB;
+  const toA = critA ? finite(baseToA * Math.max(1, finite(B.combat.critMultiplier))) : baseToA;
+
+  applyHit(B, A, toB, step, r.nx, r.ny, critB);
+  applyHit(A, B, toA, step, -r.nx, -r.ny, critA);
 
   // Impact-induced lift bookkeeping for rim escape (Δv = jn / m).
   A.lastImpactStep = step;
@@ -269,18 +357,30 @@ export function applyContactDamage(
   out.b = B.index;
   out.damageToA = toA;
   out.damageToB = toB;
+  out.critToA = critA;
+  out.critToB = critB;
   out.normalSpeed = r.vn;
+  out.impact = impact;
   return true;
 }
 
-function applyHit(target: TopBody, source: TopBody, dmg: number, step: number, dirX: number, dirY: number): void {
+function applyHit(target: TopBody, source: TopBody, dmg: number, step: number, dirX: number, dirY: number, crit = false): void {
   if (dmg <= 0) return;
   const applied = Math.min(dmg, target.health);
   target.health = Math.max(0, target.health - dmg);
   target.damageReceived += applied;
   source.damageDealt += applied;
   if (dmg >= LANDED_HIT_MIN) source.hitsLanded++;
-  if (dmg > source.strongestHit) source.strongestHit = dmg;
+  source.damagingHits++;
+  if (crit) {
+    source.critsLanded++;
+    target.critsReceived++;
+    source.critDamageDealt += applied;
+  }
+  if (dmg > source.strongestHit) {
+    source.strongestHit = dmg;
+    source.strongestHitCritical = crit;
+  }
   if (target.health <= 0 && !target.eliminated) {
     target.eliminated = 'burst';
     target.eliminatedStep = step + 1;

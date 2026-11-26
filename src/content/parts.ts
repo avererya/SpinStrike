@@ -24,6 +24,13 @@ export interface TipPart {
   spinRadius: number;
   /** Resting rocking tilt at full spin, rad. */
   rock: number;
+  /**
+   * Base gyroscopic stability contributed by the tip shape (v0.3 ruleset;
+   * weight adds a small amount on top). Not used by the v0.2 ruleset.
+   */
+  stability?: number;
+  /** v0.3 pivot friction coefficient, if different from v0.2 (`spinFriction`). */
+  spinFrictionV03?: number;
   /** Visual: tip contact radius and length, m. */
   visualRadius: number;
   visualLength: number;
@@ -41,6 +48,8 @@ export interface RingPart {
   frictionFactor: number;
   /** Blade strike factor: share of ring surface speed turned into strike impulse. */
   strike: number;
+  /** v0.3 blade strike factor, if different from v0.2 (`strike`). */
+  strikeV03?: number;
   /** Number of blades / lobes for the procedural model. */
   lobes: number;
 }
@@ -64,6 +73,7 @@ export interface CorePart {
 export const TIPS: Record<string, TipPart> = {
   'rush-flat': {
     id: 'rush-flat',
+    stability: 0.45,
     name: 'Rush Flat',
     shape: 'flat',
     driveRadius: 0.006,
@@ -76,6 +86,7 @@ export const TIPS: Record<string, TipPart> = {
   },
   'bastion-ball': {
     id: 'bastion-ball',
+    stability: 0.6,
     name: 'Bastion Ball',
     shape: 'ball',
     driveRadius: 0.003,
@@ -88,6 +99,7 @@ export const TIPS: Record<string, TipPart> = {
   },
   'needle-point': {
     id: 'needle-point',
+    stability: 0.55,
     name: 'Needle Point',
     shape: 'sharp',
     driveRadius: 0.0012,
@@ -100,6 +112,7 @@ export const TIPS: Record<string, TipPart> = {
   },
   'vector-semi': {
     id: 'vector-semi',
+    stability: 0.55,
     name: 'Vector Semi-Flat',
     shape: 'semi-flat',
     driveRadius: 0.0035,

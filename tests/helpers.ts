@@ -7,7 +7,8 @@ import { getTop } from '../src/content/tops';
 import type { TopBody } from '../src/sim/body';
 
 export function phantom(over: Partial<TopPhysicsParams> = {}): TopPhysicsParams {
-  return { ...deriveTopPhysics(getTop('phantom')), ...over };
+  // Physics tests use the v0.2 Phantom so v0.1/v0.2 expectations stay exact.
+  return { ...deriveTopPhysics(getTop('phantom'), { ruleset: 'v0.2' }), ...over };
 }
 
 /** A "frictionless puck" top: no tip coupling, no drag, no decay. */

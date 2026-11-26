@@ -32,7 +32,7 @@ export class FixedStepRunner {
     if (this.paused) return this.alpha;
     this.accumulator += Math.min(Math.max(realDt, 0), this.maxFrameTime) * this.speed;
     while (this.accumulator >= dt && this.stepsLastFrame < this.maxStepsPerFrame) {
-      if (this.battle.phase === 'running') this.battle.step();
+      if (this.battle.phase !== 'finished') this.battle.step();
       else if (this.runAftermath && this.battle.world.time < this.battle.result!.time + 6) this.battle.stepAftermath();
       this.accumulator -= dt;
       this.stepsLastFrame++;

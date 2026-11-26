@@ -41,7 +41,8 @@ describe('simulation speed independence', () => {
       // Irregular wall-clock frame times (deterministic pattern).
       const frames = [1 / 60, 1 / 144, 1 / 30, 0.05, 1 / 90, 0.2];
       let i = 0;
-      while (bt.phase === 'running') runner.advance(frames[i++ % frames.length]!);
+      // v0.3: 'resolving' (draw window) is still part of the battle.
+      while (bt.phase !== 'finished') runner.advance(frames[i++ % frames.length]!);
       return { result: bt.result, state: snapshot(bt) };
     });
     for (const r of results.slice(1)) {

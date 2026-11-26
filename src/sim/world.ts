@@ -9,6 +9,7 @@ import {
   DEFAULT_COMBAT,
   applyContactDamage,
   makeContactReport,
+  makeDamageEvent,
   makePairState,
   rimEscape,
   updatePairArming,
@@ -48,6 +49,11 @@ export interface WorldOptions {
   combat?: CombatParams;
   /** Per-top combat stats, same order as `tops`. Defaults to DEFAULT_TOP_COMBAT. */
   topCombat?: readonly TopCombatStats[];
+  /**
+   * Per-top launch rotational-energy multipliers from launch quality (v0.3).
+   * Default 1. The multiplier scales ENERGY; ω follows from ω = √(2E/I).
+   */
+  launchEnergyMultipliers?: readonly number[];
 }
 
 export interface StepStats {
@@ -76,6 +82,14 @@ export class World {
   readonly stepHz: number;
   /** When false, no damage or knockouts are applied (set once a battle is decided). */
   combatEnabled = true;
+  /**
+   * Spin-finish resolution phase (v0.3 draw window): when true, a top that
+   * has stopped spinning takes no further part in top–top contact, so the
+   * window measures only the survivor's legitimate remaining endurance.
+   */
+  excludeStoppedFromContact = false;
+  /** Damaging top–top impacts so far; keys the critical-hit rolls. */
+  impactCount = 0;
   steps = 0;
   readonly stats: StepStats = { steps: 0, substepsLast: 0, substepsTotal: 0, maxSubsteps: 0, pendingEvents: 0 };
   /** Collision events since last `drainEvents()` (bounded). */
@@ -83,7 +97,7 @@ export class World {
   private readonly contacts: ContactState[] = [];
   private readonly pairCombat: PairCombatState[] = [];
   private readonly report: ContactReport = makeContactReport();
-  private readonly damageScratch: DamageEvent = { step: 0, x: 0, y: 0, nx: 0, ny: 0, a: 0, b: 0, damageToA: 0, damageToB: 0, normalSpeed: 0 };
+  private readonly damageScratch: DamageEvent = makeDamageEvent();
   private pendingDamage: DamageEvent[] = [];
   private readonly minRadius: number;
   private readonly slopeOut = { x: 0, y: 0 };
@@ -103,11 +117,11 @@ export class World {
       }
     }
     this.minRadius = Math.min(...this.bodies.map((b) => b.params.radius));
-    this.launch(opts.launch);
+    this.launch(opts.launch, opts.launchEnergyMultipliers);
   }
 
   /** Places and launches tops using seeded randomness. */
-  private launch(l: LaunchParams): void {
+  private launch(l: LaunchParams, multipliers?: readonly number[]): void {
     const rng = new Rng(this.seed);
     const n = this.bodies.length;
     const base = rng.next() * Math.PI * 2;
@@ -126,7 +140,10 @@ export class World {
       const speed = p.launchSpeed * (1 + rng.spread(l.powerSpread));
       b.vx = Math.cos(dir) * speed;
       b.vy = Math.sin(dir) * speed;
-      const energy = p.launchSpinEnergy * (1 + rng.spread(l.powerSpread));
+      const m = multipliers?.[b.index];
+      const mult = typeof m === 'number' && Number.isFinite(m) && m > 0 ? m : 1;
+      // Launch quality scales rotational ENERGY (not ω): E = E₀·(1 ± spread)·q.
+      const energy = p.launchSpinEnergy * (1 + rng.spread(l.powerSpread)) * mult;
       // Right spin is clockwise viewed from above ⇒ negative ω about +z.
       b.omega = -p.spinDirection * Math.sqrt((2 * energy) / b.inertia);
       b.launchEnergy = b.spinEnergy;
@@ -165,10 +182,12 @@ export class World {
           const pair = this.pairCombat[c++]!;
           // Burst / knocked-out tops have left play: no further contact.
           if (A.eliminated !== null || B.eliminated !== null) continue;
+          if (this.excludeStoppedFromContact && (!A.spinning || !B.spinning)) continue;
           const ev = resolveTopPair(A, B, this.collision, contact, this.steps, this.report);
           if (ev) this.pushEvent(ev);
           if (this.combatEnabled) {
-            if (applyContactDamage(A, B, this.report, pair, cp, this.steps, this.stepHz, this.damageScratch)) {
+            if (applyContactDamage(A, B, this.report, pair, cp, this.steps, this.stepHz, this.damageScratch, this.seed, this.impactCount)) {
+              this.impactCount++;
               this.pushDamage({ ...this.damageScratch });
             }
             updatePairArming(A, B, pair, cp);

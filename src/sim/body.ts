@@ -45,6 +45,8 @@ export class TopBody {
   readonly criticalSpin: number;
   /** Effective centre-of-mass height after stability adjustment, m. */
   readonly effectiveComHeight: number;
+  /** Rotational energy at the critical (toppling) spin, J. */
+  readonly criticalEnergy: number;
 
   // --- bookkeeping ---
   launchEnergy = 0;
@@ -68,6 +70,15 @@ export class TopBody {
   hitsLanded = 0;
   /** Largest single damaging hit this top dealt. */
   strongestHit = 0;
+  /** True when {@link strongestHit} was a critical hit. */
+  strongestHitCritical = false;
+  // --- critical hits (v0.3) ---
+  critsLanded = 0;
+  /** Impacts in which this top dealt any damage (> 0), i.e. critical-hit roll opportunities. */
+  damagingHits = 0;
+  critsReceived = 0;
+  /** Total damage dealt by this top's critical hits (applied health loss). */
+  critDamageDealt = 0;
   /** Set when the top burst or was knocked out (it then leaves active physics). */
   eliminated: Exclude<FinishKind, 'spin'> | null = null;
   eliminatedStep = -1;
@@ -99,6 +110,7 @@ export class TopBody {
     const l = this.effectiveComHeight;
     const iPerp = 0.5 * this.inertia + params.mass * l * l;
     this.criticalSpin = Math.sqrt(4 * params.mass * GRAVITY * l * iPerp) / this.inertia;
+    this.criticalEnergy = 0.5 * this.inertia * this.criticalSpin * this.criticalSpin;
   }
 
   /** Health as a fraction of maximum (0–1). */
@@ -123,6 +135,20 @@ export class TopBody {
   /** Rotational energy remaining as a fraction of launch energy (0–1). */
   get spinFraction(): number {
     return this.launchEnergy > 0 ? this.spinEnergy / this.launchEnergy : 0;
+  }
+
+  /**
+   * Usable stamina (0–1): rotational energy above the toppling threshold,
+   * relative to the energy actually launched (launch bonus included).
+   * 1 at launch, exactly 0 when the top can no longer stay upright. This is
+   * what the HUD stamina bar and result statistics show (v0.3).
+   */
+  get staminaFraction(): number {
+    if (!this.spinning) return 0;
+    const span = this.launchEnergy - this.criticalEnergy;
+    if (!(span > 0)) return 0;
+    const f = (this.spinEnergy - this.criticalEnergy) / span;
+    return f > 1 ? 1 : f > 0 ? f : 0;
   }
 
   get tiltX(): number {

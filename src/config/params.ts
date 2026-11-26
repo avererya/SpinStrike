@@ -50,6 +50,8 @@ export const TOP_COMBAT_PARAMS = [
   { key: 'maxHealth', label: 'Maximum health', min: 1, max: 5000, step: 1, unit: 'HP', help: 'Structural integrity. 0 health = burst finish.' },
   { key: 'attack', label: 'Attack', min: 0, max: 300, step: 1, unit: '', help: 'Scales outgoing damage linearly (combat only; physical parts unchanged).' },
   { key: 'defense', label: 'Defense', min: 0, max: 300, step: 1, unit: '', help: 'Reduces incoming damage with diminishing returns (combat only).' },
+  { key: 'critChance', label: 'Critical chance', min: 0, max: 1, step: 0.01, unit: '', help: 'Probability that a damaging impact by this top is a critical hit (0.05 = 5 %).' },
+  { key: 'critMultiplier', label: 'Critical damage multiplier', min: 1, max: 10, step: 0.05, unit: '×', help: 'Structural damage multiplier of a critical hit. Never changes impulse or spin.' },
 ] as const satisfies readonly ParamSpec[];
 
 export const TOP_PARAMS = [
@@ -67,6 +69,8 @@ export type CollisionParamKey = (typeof COLLISION_PARAMS)[number]['key'];
 export type TopParamKey = (typeof TOP_PARAMS)[number]['key'];
 export type CombatParamKey = (typeof COMBAT_PARAMS)[number]['key'];
 export type TopCombatParamKey = (typeof TOP_COMBAT_PARAMS)[number]['key'];
+export type LaunchParamKey = (typeof LAUNCH_PARAMS)[number]['key'];
+export type ResultParamKey = (typeof RESULT_PARAMS)[number]['key'];
 export type TopOverrideKey = TopParamKey | TopCombatParamKey;
 
 /** Boolean switches stored in the configuration. */
@@ -74,7 +78,42 @@ export const FLAG_PARAMS = [
   { key: 'knockouts', group: 'combat', label: 'Knockouts (rim escape)', help: 'Allow tops to be knocked over the rim.' },
   { key: 'cinematicFinishes', group: 'presentation', label: 'Cinematic finishes', help: 'Slow motion, flash and finish banners (presentation only).' },
   { key: 'damageNumbers', group: 'presentation', label: 'Floating damage numbers', help: 'Show damage numbers above damaging hits.' },
+  { key: 'criticalEffects', group: 'presentation', label: 'Critical hit effects', help: 'Golden damage numbers, CRITICAL HIT label and stronger sparks for critical hits.' },
+  { key: 'criticalHits', group: 'combat', label: 'Critical hits', help: 'Enable critical-hit rolls on damaging impacts.' },
 ] as const;
+
+/** Launch minigame / launch quality numeric settings (v0.3). */
+export const LAUNCH_PARAMS = [
+  { key: 'sweepTime', label: 'Indicator sweep time', min: 0.3, max: 4, step: 0.05, unit: 's', help: 'Seconds for the indicator to cross the meter once (0 → 100 %).' },
+  { key: 'timeout', label: 'Launch timeout', min: 1, max: 30, step: 0.5, unit: 's', help: 'If the player does not launch within this time, the launch is Poor.' },
+] as const satisfies readonly ParamSpec[];
+
+/** Zone half-widths around the meter centre; boundaries count toward the better zone. */
+export const LAUNCH_ZONE_PARAMS = [
+  { key: 'perfect', label: 'Perfect zone half-width', min: 0.005, max: 0.5, step: 0.005, unit: '', help: '0.05 → Perfect from 45 % to 55 % (inclusive).' },
+  { key: 'great', label: 'Great zone half-width', min: 0.005, max: 0.5, step: 0.005, unit: '', help: '0.20 → Great from 30 % to 70 %.' },
+  { key: 'good', label: 'Good zone half-width', min: 0.005, max: 0.5, step: 0.005, unit: '', help: '0.35 → Good from 15 % to 85 %. Outside = Poor.' },
+] as const satisfies readonly ParamSpec[];
+
+export const LAUNCH_BONUS_PARAMS = [
+  { key: 'poor', label: 'Poor energy multiplier', min: 0.5, max: 2, step: 0.005, unit: '×', help: 'Starting rotational-energy multiplier.' },
+  { key: 'good', label: 'Good energy multiplier', min: 0.5, max: 2, step: 0.005, unit: '×', help: 'Starting rotational-energy multiplier.' },
+  { key: 'great', label: 'Great energy multiplier', min: 0.5, max: 2, step: 0.005, unit: '×', help: 'Starting rotational-energy multiplier.' },
+  { key: 'perfect', label: 'Perfect energy multiplier', min: 0.5, max: 2, step: 0.005, unit: '×', help: 'Starting rotational-energy multiplier (energy, not angular velocity).' },
+] as const satisfies readonly ParamSpec[];
+
+export const AI_LAUNCH_PARAMS = [
+  { key: 'poor', label: 'AI Poor probability', min: 0, max: 1, step: 0.01, unit: '', help: 'The four probabilities must sum to 1.' },
+  { key: 'good', label: 'AI Good probability', min: 0, max: 1, step: 0.01, unit: '', help: 'The four probabilities must sum to 1.' },
+  { key: 'great', label: 'AI Great probability', min: 0, max: 1, step: 0.01, unit: '', help: 'The four probabilities must sum to 1.' },
+  { key: 'perfect', label: 'AI Perfect probability', min: 0, max: 1, step: 0.01, unit: '', help: 'The four probabilities must sum to 1.' },
+] as const satisfies readonly ParamSpec[];
+
+/** Result rules (v0.3). */
+export const RESULT_PARAMS = [
+  { key: 'drawWindow', label: 'Spin-finish draw window', min: 0, max: 2, step: 0.01, unit: 's', help: 'If the second top stops within this simulated time of the first, the battle is a draw. 0 = v0.2 rule (same step only).' },
+  { key: 'narrowThreshold', label: 'Narrow victory threshold', min: 0, max: 0.2, step: 0.005, unit: '', help: 'Spin wins with winner stamina at or below this fraction are labelled NARROW VICTORY (presentation only).' },
+] as const satisfies readonly ParamSpec[];
 
 export const SIM_LIMITS = {
   maxDuration: { min: 5, max: 600 },

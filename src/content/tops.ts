@@ -67,6 +67,17 @@ export const STARTER_TOPS: readonly TopDefinition[] = [
   },
 ];
 
+/**
+ * v0.2 starter stats, kept for the legacy v0.2 ruleset (regression runs and
+ * migrated v0.1/v0.2 configurations). v0.3 stats live in STARTER_TOPS.
+ */
+export const LEGACY_V02_STATS: Readonly<Record<string, GameplayStats>> = {
+  inferno: { health: 60, attack: 90, defense: 35, stamina: 45, speed: 85, weight: 50 },
+  titan: { health: 90, attack: 40, defense: 95, stamina: 65, speed: 30, weight: 95 },
+  tempest: { health: 60, attack: 35, defense: 50, stamina: 100, speed: 50, weight: 55 },
+  phantom: { health: 65, attack: 65, defense: 65, stamina: 65, speed: 65, weight: 65 },
+};
+
 export function getTop(id: string): TopDefinition {
   const t = STARTER_TOPS.find((d) => d.id === id);
   if (!t) throw new Error(`Unknown top id: ${id}`);
