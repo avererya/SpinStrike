@@ -22,6 +22,7 @@ import {
   UPGRADE_STATS,
 } from './config';
 import type { RankState } from './progression';
+import { clampAim, isAim, type LaunchAim } from '../sim/launchGeometry';
 import { emptyTopStats, int, sanitizeTopStats, type TopStats } from './history';
 
 export const SAVE_SCHEMA_VERSION = 1;
@@ -44,6 +45,12 @@ export interface OwnedTop {
   equipment: Record<string, string | null>;
   /** Reserved: cosmetic selections (later release). Empty in v0.4. */
   cosmetics: Record<string, string>;
+  /**
+   * v0.4.1: the player's last launch aim with this top (optional; absent on
+   * v0.4.0 saves and until the player first aims). Not a schema change:
+   * older builds simply ignore it.
+   */
+  launchAim?: LaunchAim;
 }
 
 export interface CareerSave {
@@ -162,6 +169,7 @@ function sanitizeTop(v: unknown, i: number, warnings: string[], seen: Set<string
     stats: sanitizeTopStats(v.stats),
     equipment: isObj(v.equipment) ? Object.fromEntries(Object.entries(v.equipment).filter(([, x]) => x === null || typeof x === 'string')) as Record<string, string | null> : {},
     cosmetics: isObj(v.cosmetics) ? Object.fromEntries(Object.entries(v.cosmetics).filter(([, x]) => typeof x === 'string')) as Record<string, string> : {},
+    ...(isAim(v.launchAim) ? { launchAim: clampAim(v.launchAim) } : {}),
   };
 }
 

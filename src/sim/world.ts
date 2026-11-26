@@ -1,10 +1,12 @@
 import { TopBody } from './body';
 import type { TopPhysicsParams } from './topParams';
 import type { StadiumSurface } from './stadium/types';
-import { Rng } from './rng';
+import { RNG_STREAM, Rng, keyedUniform } from './rng';
 import { integrateFree, guardBody } from './dynamics';
 import { resolveTopPair, resolveWall, wallImpact, type CollisionEvent, type CollisionParams, type ContactState } from './collision';
 import { LIMITS } from './units';
+import { BattleTelemetry } from './telemetry';
+import { DEFAULT_AIM, LAUNCH_COMPONENT, clampAim, launchJitter, nominalPlacementAngle, type LaunchAim, type LaunchVariation } from './launchGeometry';
 import {
   DEFAULT_COMBAT,
   applyContactDamage,
@@ -29,6 +31,11 @@ export interface LaunchParams {
   angleSpread: number;
   /** Relative random spread applied to launch speed and spin (seeded). */
   powerSpread: number;
+  /**
+   * v0.4.1 launch model: per-slot independent keyed variation around the
+   * aim (see launchGeometry.ts). Undefined = the v0.4.0 launch, exactly.
+   */
+  variation?: LaunchVariation;
 }
 
 export const DEFAULT_LAUNCH: LaunchParams = {
@@ -54,6 +61,10 @@ export interface WorldOptions {
    * Default 1. The multiplier scales ENERGY; ω follows from ω = √(2E/I).
    */
   launchEnergyMultipliers?: readonly number[];
+  /** Telemetry trace sampling (steps between trace samples, 0 = no trace). Observation only. */
+  traceEvery?: number;
+  /** Per-slot launch aim (v0.4.1 launch model only). Default DEFAULT_AIM. */
+  aims?: readonly (LaunchAim | undefined)[];
 }
 
 export interface StepStats {
@@ -91,6 +102,8 @@ export class World {
   /** Damaging top–top impacts so far; keys the critical-hit rolls. */
   impactCount = 0;
   steps = 0;
+  /** Contact / hit / movement telemetry (v0.4.1). Observation only. */
+  readonly telemetry: BattleTelemetry;
   readonly stats: StepStats = { steps: 0, substepsLast: 0, substepsTotal: 0, maxSubsteps: 0, pendingEvents: 0 };
   /** Collision events since last `drainEvents()` (bounded). */
   private pending: CollisionEvent[] = [];
@@ -110,6 +123,7 @@ export class World {
     this.combatParams = opts.combat ?? DEFAULT_COMBAT;
     this.stepHz = opts.stepHz;
     this.bodies = opts.tops.map((p, i) => new TopBody(i, p, opts.topCombat?.[i]));
+    this.telemetry = new BattleTelemetry(opts.stepHz, { traceEvery: opts.traceEvery });
     for (let i = 0; i < this.bodies.length; i++) {
       for (let j = i + 1; j < this.bodies.length; j++) {
         this.contacts.push({ touching: false });
@@ -117,7 +131,57 @@ export class World {
       }
     }
     this.minRadius = Math.min(...this.bodies.map((b) => b.params.radius));
-    this.launch(opts.launch, opts.launchEnergyMultipliers);
+    if (opts.launch.variation) this.launchV041(opts.launch, opts.launch.variation, opts.launchEnergyMultipliers, opts.aims);
+    else this.launch(opts.launch, opts.launchEnergyMultipliers);
+  }
+
+  /**
+   * v0.4.1 launch: nominal placement from the seed (slots evenly spaced),
+   * the slot's aim (heading offset, release tilt), plus independently keyed
+   * natural variation per slot. The release tilt leans the axis so that the
+   * tip's contact offset drives the top along its heading (a tilted
+   * launcher sends a top running sideways off its tip); the drive is paid
+   * for by spin through the normal tip-traction coupling in dynamics.ts.
+   */
+  private launchV041(l: LaunchParams, v: LaunchVariation, multipliers?: readonly number[], aims?: readonly (LaunchAim | undefined)[]): void {
+    const n = this.bodies.length;
+    const R = this.stadium.boundingRadius;
+    const seed = this.seed;
+    const C = LAUNCH_COMPONENT;
+    for (const b of this.bodies) {
+      const p = b.params;
+      const i = b.index;
+      const aim = clampAim(aims?.[i] ?? DEFAULT_AIM);
+      const a = nominalPlacementAngle(seed, i, n) + launchJitter(seed, i, C.position, v.position);
+      const r = R * l.radiusFraction * (1 + launchJitter(seed, i, C.radius, v.radius));
+      b.x = b.px = Math.cos(a) * r;
+      b.y = b.py = Math.sin(a) * r;
+      const travelSign = p.spinDirection;
+      const tangent = a + travelSign * Math.PI * 0.5;
+      const heading = tangent + travelSign * (l.inwardAngle + (aim.direction * Math.PI) / 180) + launchJitter(seed, i, C.heading, v.heading);
+      const speed = p.launchSpeed * (1 + launchJitter(seed, i, C.speed, v.speed));
+      b.vx = Math.cos(heading) * speed;
+      b.vy = Math.sin(heading) * speed;
+      const m = multipliers?.[i];
+      const mult = typeof m === 'number' && Number.isFinite(m) && m > 0 ? m : 1;
+      const energy = p.launchSpinEnergy * (1 + launchJitter(seed, i, C.energy, v.energy)) * mult;
+      b.omega = -p.spinDirection * Math.sqrt((2 * energy) / b.inertia);
+      b.launchEnergy = b.spinEnergy;
+      b.angle = b.prevAngle = ((launchJitter(seed, i, C.spinAngle, 1) + 1) * Math.PI) % (Math.PI * 2);
+      b.tilt = Math.max(0.005, (aim.tilt * Math.PI) / 180 + launchJitter(seed, i, C.tilt, v.tilt));
+      // Tip drive force ∝ −ω·(ẑ × c): lean the axis 90° from the heading so the drive points along it.
+      b.tiltPhase = heading + (b.omega >= 0 ? 1 : -1) * Math.PI * 0.5;
+      b.leanX = 0;
+      b.leanY = 0;
+      // Contact wander: seeded incommensurate frequencies (0.25–1.1 Hz) and phases.
+      const f: number[] = [];
+      const ph: number[] = [];
+      for (let k = 0; k < 6; k++) {
+        f.push(2 * Math.PI * (0.25 + 0.85 * keyedUniform(RNG_STREAM.wander, seed, i, k, 1)));
+        ph.push(2 * Math.PI * keyedUniform(RNG_STREAM.wander, seed, i, k, 2));
+      }
+      b.wander = { f, ph };
+    }
   }
 
   /** Places and launches tops using seeded randomness. */
@@ -171,6 +235,7 @@ export class World {
 
     const cp = this.combatParams;
     const w = this.collision.statSpinDrainWeight;
+    let touchedThisStep = false;
     for (let s = 0; s < n; s++) {
       for (const b of bodies) if (b.eliminated === null) integrateFree(b, this.stadium, h);
       let c = 0;
@@ -183,11 +248,17 @@ export class World {
           // Burst / knocked-out tops have left play: no further contact.
           if (A.eliminated !== null || B.eliminated !== null) continue;
           if (this.excludeStoppedFromContact && (!A.spinning || !B.spinning)) continue;
+          const wasTouching = contact.touching;
           const ev = resolveTopPair(A, B, this.collision, contact, this.steps, this.report);
+          if (this.report.active) {
+            touchedThisStep = true;
+            if (!wasTouching) this.telemetry.onContactBegin(this.steps);
+          }
           if (ev) this.pushEvent(ev);
           if (this.combatEnabled) {
             if (applyContactDamage(A, B, this.report, pair, cp, this.steps, this.stepHz, this.damageScratch, this.seed, this.impactCount)) {
               this.impactCount++;
+              this.telemetry.onDamagingHit(this.steps);
               this.pushDamage({ ...this.damageScratch });
             }
             updatePairArming(A, B, pair, cp);
@@ -232,6 +303,7 @@ export class World {
         b.stoppedStep = this.steps;
       }
     }
+    if (bodies.length >= 2) this.telemetry.onStep(this.steps, bodies[0]!, bodies[1]!, touchedThisStep);
     this.stats.steps = this.steps;
     this.stats.substepsLast = n;
     this.stats.substepsTotal += n;

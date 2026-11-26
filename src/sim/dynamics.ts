@@ -70,6 +70,17 @@ export function integrateFree(b: TopBody, stadium: StadiumSurface, dt: number): 
   // tip's contact patch can physically express before its edge digs in.
   let lx = sx - b.leanX + tx;
   let ly = sy - b.leanY + ty;
+  const wanderAmp = p.contactWander ?? 0;
+  if (b.wander && wanderAmp > 0) {
+    // Smooth seeded contact wander (v0.4.1), growing as spin runs down.
+    const t = (b.wanderT += dt);
+    const ratio = b.criticalSpin / Math.max(Math.abs(b.omega), 1e-6);
+    const amp = (wanderAmp * (1 + (p.wanderSpinGain ?? 0) * ratio * ratio)) / Math.sqrt(1.5);
+    const f = b.wander.f;
+    const ph = b.wander.ph;
+    lx += amp * (Math.sin(f[0]! * t + ph[0]!) + Math.sin(f[1]! * t + ph[1]!) + Math.sin(f[2]! * t + ph[2]!));
+    ly += amp * (Math.sin(f[3]! * t + ph[3]!) + Math.sin(f[4]! * t + ph[4]!) + Math.sin(f[5]! * t + ph[5]!));
+  }
   const l2 = lx * lx + ly * ly;
   if (l2 > MAX_CONTACT_LEAN * MAX_CONTACT_LEAN) {
     const k = MAX_CONTACT_LEAN / Math.sqrt(l2);

@@ -89,7 +89,10 @@ export const DEFAULT_COMBAT: CombatParams = {
   rearmTime: 0.08,
   knockouts: true,
   rimClimbEfficiency: 0.8,
-  impactLift: 0.7,
+  // v0.4.1: 0.7 → 0.55. With varied launches and contact wander, tops meet
+  // at speed far more often; at 0.7 knockouts rose from 2.5 % to 11 % of
+  // battles, mostly Inferno mirrors ending in a few seconds.
+  impactLift: 0.55,
   liftWindow: 0.25,
   stabilityLipFactor: 0.5,
   criticalHits: true,

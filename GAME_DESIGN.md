@@ -32,13 +32,13 @@ This document records the long-term vision and the design decisions made so far.
 
 | Top | Class | Identity | Health | Attack | Defense | Stamina | Speed | Weight |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Inferno | Attack | Red/black/silver, jagged ring. Fast and aggressive, hits hard, burns spin | 63 | 95 | 35 | 62 | 85 | 50 |
-| Titan | Defense | Blue/silver, thick armoured ring. Heavy, stable, settles in the centre | 72 | 82 | 82 | 60 | 30 | 95 |
-| Tempest | Stamina | Emerald/gold, smooth ring. Efficient with long endurance | 63 | 40 | 65 | 75 | 50 | 55 |
-| Phantom | Balance | Purple/silver/black, moderate winged ring. Well-rounded | 69 | 72 | 65 | 67 | 65 | 65 |
+| Inferno | Attack | Red/black/silver, jagged ring. Fast and aggressive, hits hard, burns spin | 60 | 95 | 35 | 64 | 90 | 50 |
+| Titan | Defense | Blue/silver, thick armoured ring. Heavy, stable, settles in the centre | 80 | 55 | 90 | 70 | 30 | 95 |
+| Tempest | Stamina | Emerald/gold, smooth ring. Efficient with long endurance | 65 | 40 | 45 | 95 | 55 | 55 |
+| Phantom | Balance | Purple/silver/black, moderate winged ring. Well-rounded | 65 | 67 | 56 | 66 | 65 | 65 |
 
 - Names, classes, visual identity and physical identity are **[Confirmed]**.
-- The stat values (v0.3 rebalance shown; v0.2 values are kept in `LEGACY_V02_STATS`) are **[Provisional]** relative design values (0–100), not physical units.
+- The stat values (v0.4.1 shown; v0.4.0 values are kept in `LEGACY_V040_STATS` and v0.2 values in `LEGACY_V02_STATS`) are **[Provisional]** relative design values (0–100), not physical units.
 - Part names (Rush Flat, Bastion Ball, Needle Point, Vector Semi-Flat; Blaze Fang, Aegis Wall, Zephyr Halo, Eclipse Wing; disc and core names) are **[Implementation assumption]**: original placeholder names.
 - All starter tops spin right (clockwise from above). **[Implementation assumption]**
 
@@ -199,6 +199,10 @@ Approved design requirements and provisional values are listed separately in `do
 
 **Approved:** one currency (Credits); account-wide career rank vs per-top level/XP/upgrades; levels 1-30 with XP 100 + 25(L-1); six attributes x ten ranks with costs 100/200/350/500/750/1000/1500/2000/3000/4500 (Common) and rarity multipliers 1/1.25/1.5/2; rank-10 bonuses Health +50 %, Attack +40 %, Defense +40 %, Stamina +30 %, Speed +25 %, Crit +20 points (5 % to 25 %); level gates for upgrade ranks (L1:2, L5:4, L10:6, L15:8, L20:9, L25:10); rewards by rank tier and difficulty multipliers; outcome shares (win 100 %, defeat 5 %/10 %, draw 15 %/25 %, quit 0); no energy, repair costs, premium currency or progression loss.
 
-**Provisional:** 500 starting Credits; Bronze win requirements 10/20/30; difficulty launch distributions; Bronze opponent build bands; Expert 2x multiplier (under review); the stat-mapping ceiling of 150.
+**Provisional:** 500 starting Credits; Bronze win requirements 10/20/30; difficulty launch distributions; Bronze opponent build bands; difficulty reward multipliers (v0.4.1: 0.75/1/1.1/1.2, temporary); the stat-mapping ceiling of 150.
+
+**v0.4.1 changes (combat dynamics & progression refinement):** seeded, physically plausible movement variability (independent launch placement/heading/speed/tilt/energy per top, floor micro-relief and grip variation, per-tip contact wander); interactive launch aiming (direction −45…+45°, tilt 0…30°) before the timing minigame, remembered per owned top, with a seeded AI aim; class identities restored (Titan attack 82 → 55, Tempest stamina 75 → 95); stamina mapping made hyperbolic so high ranks no longer compound; temporary difficulty reward multipliers Easy 0.75 / Normal 1 / Hard 1.1 / Expert 1.2; history records carry the ruleset and aims (new records only). Full report: `docs/COMBAT_DYNAMICS_v0.4.1.md`.
+
+**Prepared for v0.5 (not implemented):** directional boost and brace. Aiming already uses the same physical levers a boost would (tip drive direction, tilt), and Speed's weak effect on win rate is a candidate for the boost's strength.
 
 **Future (not implemented):** equipment, signature abilities (levels 10 and 20 reserved), shop, more tops and stadiums, championships, bosses, achievements, cosmetics, multiplayer.

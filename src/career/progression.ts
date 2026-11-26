@@ -22,7 +22,7 @@ import {
   type UpgradeStat,
 } from './config';
 import { BASE_CRIT_CHANCE } from '../sim/combat';
-import { baseStats } from '../content/derive';
+import { DEFAULT_RULESET, baseStats, type Ruleset } from '../content/derive';
 import type { GameplayStats } from '../content/stats';
 import type { TopDefinition } from '../content/tops';
 
@@ -128,8 +128,8 @@ const round3 = (v: number) => Math.round(v * 1000) / 1000;
  * points per rank on the 5 % base. Rank 0 returns the unmodified v0.3.1
  * base stats, so an unupgraded top is identical to the sandbox starter.
  */
-export function effectiveStats(def: TopDefinition, ranks: UpgradeRanks): EffectiveStats {
-  const b = baseStats(def);
+export function effectiveStats(def: TopDefinition, ranks: UpgradeRanks, ruleset: Ruleset = DEFAULT_RULESET): EffectiveStats {
+  const b = baseStats(def, ruleset);
   const f = (stat: Exclude<UpgradeStat, 'critChance'>) => round3(b[stat] * (1 + (MAX_RANK_BONUS[stat] * clampRank(ranks[stat])) / MAX_UPGRADE_RANK));
   return {
     stats: { health: f('health'), attack: f('attack'), defense: f('defense'), stamina: f('stamina'), speed: f('speed'), weight: b.weight },

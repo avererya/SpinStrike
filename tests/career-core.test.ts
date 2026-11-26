@@ -83,11 +83,12 @@ describe('effective stats', () => {
     const d = getTop('inferno');
     const max = Object.fromEntries(UPGRADE_STATS.map((k) => [k, 10])) as ReturnType<typeof zeroRanks>;
     const e = effectiveStats(d, max);
-    expect(e.stats.health).toBeCloseTo(63 * 1.5, 6);
+    // v0.4.1 Inferno base stats (60/95/35/64/90/50); the rank bonuses are unchanged.
+    expect(e.stats.health).toBeCloseTo(60 * 1.5, 6);
     expect(e.stats.attack).toBeCloseTo(95 * 1.4, 6);
     expect(e.stats.defense).toBeCloseTo(35 * 1.4, 6);
-    expect(e.stats.stamina).toBeCloseTo(62 * 1.3, 6);
-    expect(e.stats.speed).toBeCloseTo(85 * 1.25, 6);
+    expect(e.stats.stamina).toBeCloseTo(64 * 1.3, 6);
+    expect(e.stats.speed).toBeCloseTo(90 * 1.25, 6);
     expect(e.stats.weight).toBe(50);
     expect(e.critChance).toBeCloseTo(0.25, 9);
     const r5 = effectiveStats(d, { ...zeroRanks(), attack: 5, critChance: 3 });
@@ -97,16 +98,17 @@ describe('effective stats', () => {
 });
 
 describe('rewards', () => {
-  it('matches the approved Bronze table with difficulty multipliers', () => {
-    const exp: Record<Difficulty, [number, number]> = { easy: [50, 25], normal: [100, 50], hard: [150, 75], expert: [200, 100] };
+  it('matches the Bronze table with the temporary v0.4.1 difficulty multipliers (0.75/1/1.1/1.2, one half-up rounding)', () => {
+    const exp: Record<Difficulty, [number, number]> = { easy: [75, 38], normal: [100, 50], hard: [110, 55], expert: [120, 60] };
     for (const d of DIFFICULTIES) expect(calculateReward('bronze', d, 'win')).toEqual({ credits: exp[d][0], xp: exp[d][1] });
   });
   it('pays 5%/10% for a defeat and 15%/25% for a draw (round half up)', () => {
     expect(calculateReward('bronze', 'normal', 'loss')).toEqual({ credits: 5, xp: 5 });
     expect(calculateReward('bronze', 'normal', 'draw')).toEqual({ credits: 15, xp: 13 });
-    expect(calculateReward('bronze', 'expert', 'loss')).toEqual({ credits: 10, xp: 10 });
-    expect(calculateReward('bronze', 'easy', 'loss')).toEqual({ credits: 3, xp: 3 });
-    expect(calculateReward('master', 'hard', 'win')).toEqual({ credits: 900, xp: 375 });
+    expect(calculateReward('bronze', 'expert', 'loss')).toEqual({ credits: 6, xp: 6 });
+    expect(calculateReward('bronze', 'easy', 'loss')).toEqual({ credits: 4, xp: 4 }); // 3.75 → 4 (single rounding)
+    expect(calculateReward('bronze', 'easy', 'draw')).toEqual({ credits: 11, xp: 9 }); // 11.25 → 11, 9.375 → 9
+    expect(calculateReward('master', 'hard', 'win')).toEqual({ credits: 660, xp: 275 });
   });
   it('starting credits constant', () => expect(STARTING_CREDITS).toBe(500));
 });

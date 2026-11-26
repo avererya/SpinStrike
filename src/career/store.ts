@@ -30,6 +30,8 @@ import {
   type Reward,
 } from './progression';
 import { recordBattle, type BattleRecord } from './history';
+import { PHYSICS_VERSION } from '../content/derive';
+import { clampAim, type LaunchAim } from '../sim/launchGeometry';
 import { SAVE_SCHEMA_VERSION, createCareer, loadSaveData, makeExport, parseImport, type CareerSave, type OwnedTop } from './save';
 import type { CareerBattleSetup } from './battle';
 import type { BattleResult } from '../sim/battle';
@@ -316,6 +318,8 @@ export class CareerStore {
       damageReceived: Math.round(theirs.damageDealt * 10) / 10,
       crits: mine.critsLanded,
       rewards: reward,
+      ruleset: PHYSICS_VERSION,
+      ...(result.aims ? { aim: { ...result.aims[0]! }, opponentAim: { ...result.aims[1]! } } : {}),
     };
 
     const rankBefore = s.rank;
@@ -331,6 +335,7 @@ export class CareerStore {
 
     const updatedTop: OwnedTop = {
       ...top,
+      ...(result.aims ? { launchAim: { ...result.aims[0]! } } : {}),
       level: xp.level,
       xp: xp.xp,
       lifetimeXp: top.lifetimeXp + reward.xp,
@@ -361,6 +366,18 @@ export class CareerStore {
     };
     this.settled.set(setup.battleId, summary);
     return summary;
+  }
+
+  /** Remembers the launch aim of an owned top (pre-battle aiming screen). */
+  setLaunchAim(instanceId: string, aim: LaunchAim): boolean {
+    const s = this.current;
+    if (!s) return false;
+    const top = s.tops.find((t) => t.instanceId === instanceId);
+    if (!top) return false;
+    const a = clampAim(aim);
+    if (top.launchAim && top.launchAim.direction === a.direction && top.launchAim.tilt === a.tilt) return true;
+    this.commit({ ...s, tops: s.tops.map((t) => (t.instanceId === instanceId ? { ...t, launchAim: a } : t)) });
+    return true;
   }
 
   // ------------------------------------------------------- export / import

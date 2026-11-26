@@ -2,6 +2,59 @@
 
 All notable changes to SpinStrike are documented here.
 
+## [0.4.1] — 2026-11-26 · Combat Dynamics & Progression Refinement
+
+Full report: [`docs/COMBAT_DYNAMICS_v0.4.1.md`](docs/COMBAT_DYNAMICS_v0.4.1.md).
+
+### Added
+- **Interactive launch aiming.** Before the timing minigame the player aims on a top-down stadium view: drag sideways for direction (−45…+45°, + toward the centre), up/down for tilt (0…30°). There are also sliders, ± buttons and Reset. A dotted preview shows the real-physics opening path of your top alone (nominal launch, no randomness). The canvas uses `touch-action: none` and pointer capture, so gestures never scroll the page. Space proceeds. The last aim is saved per owned top. AI opponents aim on their own seeded stream (configurable range). Aim gives no damage bonus. Tilt costs spin through the tip–floor coupling.
+- **Seeded movement variability (physical, deterministic, independent streams).**
+  - Per-slot launch variation: placement, radius, heading, speed, tilt and energy.
+  - Floor micro-relief, which is conservative.
+  - Floor grip variation, which is dissipative.
+  - Per-tip contact wander that grows as spin falls.
+  - Ball-tip centre recovery.
+  - Per-tip rolling resistance.
+- **Telemetry and entertainment metrics** (`src/sim/telemetry.ts`): contacts, damaging hits, repeated impacts, first contact and first hit, gaps, and synchronised-movement detection. These are shown in the dev-panel physics stats and reported by `npm run dynamics` (overall and per matchup).
+- **Scripts.** `npm run dynamics` (with `--baseline` for v0.4.0, plus parts and merge), `npm run upgrades` (upgrade matrix) and `npm run aim` (aim evaluation).
+- **Dev panel.** A "Movement variation & launch aim" section with every variability amount, a natural-variation switch, player and opponent aim, and the AI aim range. Also a "Load v0.4.0 baseline" button.
+- **History.** Records carry `ruleset` and both aims (new records only). Recent battles show the aim.
+- `tests/v041.test.ts` adds 23 tests, including an exact reproduction of seed 3782078522 under the v0.4.0 baseline.
+
+### Changed
+- **Starter stats.**
+  - Titan Attack 82 → 55 and Tempest Stamina 75 → 95.
+  - Full table: Inferno 60/95/35/64/90/50, Titan 80/55/90/70/30/95, Tempest 65/40/45/95/55/55, Phantom 65/67/56/66/65/65.
+  - Zephyr Halo damage cap 0.45 → 0.7 and spin-loss factor 1.5 → 1.3.
+  - v0.4.0 stats are kept as `LEGACY_V040_STATS`.
+- **Stamina mapping is hyperbolic** (`2 / (1 + 1.6667·s/100)`), so high Stamina ranks no longer compound. Rank-10 Stamina is now worth +10 to +27 points of win rate (was +22 to +46).
+- **Speed** also scales tip drive radius. Speed upgrades are still not effective; see Known issues.
+- **Impact lift** 0.7 → 0.55.
+- **Difficulty reward multipliers (temporary):** Easy 0.75, Normal 1.0, Hard 1.1, Expert 1.2 (were 0.5 / 1 / 1.5 / 2). There is one half-up integer rounding.
+- **Ruleset `v0.4.1`** is the default. `PHYSICS_VERSION` is recorded in new battle records.
+- Sandbox config files are version 4. Version 3 files import with movement variation off; versions 1 and 2 migrate as before.
+- Version 0.4.1.
+
+### Results (32,000 battles each, matched seeds 100001–102000)
+- First damaging hit median 3.0 → 2.7 s (p90 26.0 → 12.5 s).
+- No hit by 10 s: 23.9 → 12.7 %. No hit by 20 s: 15.0 → 4.5 %.
+- Battles with fewer than 5 hits: 10.3 → 3.7 %. Synchronised stretches ≥ 10 s: 5.7 → 0.2 %.
+- Tempest mirror: 0 → about 25 damaging hits.
+- Non-mirror win rates: Inferno 49.3 %, Titan 48.5 %, Tempest 51.4 %, Phantom 48.0 %.
+
+### Save compatibility
+- v0.4.0 saves load unchanged (schema 1).
+- Effective stats are recalculated from the ranks.
+- Old records are not back-filled with a ruleset or aims.
+
+### Known issues
+- **Speed upgrades are slightly negative** (about −3 to −5 points at rank 10). They need a design decision.
+- **Phantom is uneven:** it beats Inferno about 60 % and loses to Titan about 61 %.
+- **Inferno mirror** is short (median 17 s, about 6.5 hits, 9 % draws).
+- **Titan mirror** first hit has a median of 18 s.
+- **AI aim** does not vary with difficulty.
+- **Not verified on a physical iPhone,** and deployment was not verified from this environment. Mobile was checked only in emulated iPhone 13 (Playwright, headless Chromium).
+
 ## [0.4.0] — 2026-11-26 · Progression Foundation
 
 ### Added

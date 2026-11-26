@@ -83,6 +83,22 @@ export interface TopPhysicsParams {
    * barely changing glancing or moderate ones. Optional: undefined = 1.
    */
   damageCapFactor?: number;
+  /**
+   * v0.4.1 contact wander, rad (RMS). The tip's contact orientation is never
+   * perfectly steady: tip micro-chatter, precession irregularities and
+   * small surface defects shift where (and how far off-axis) the tip touches
+   * the floor. Modelled as a smooth, seeded, bounded variation of the contact
+   * lean. Because the tip drive is still Coulomb friction opposing slip, it
+   * only redirects motion that spin pays for; it never adds energy.
+   * Flat tips wander most (restless, sweeping), needles least. Optional:
+   * undefined/0 = no wander (v0.4.0).
+   */
+  contactWander?: number;
+  /**
+   * v0.4.1: growth of contact wander as spin runs down,
+   * amplitude × (1 + gain·(ω_crit/ω)²). Optional, default 0.
+   */
+  wanderSpinGain?: number;
   /** Scales how much rotational energy this top strips from an opponent on impact. */
   impactSpinDrain: number;
   /** 0–1 fraction of impact spin loss this top ignores. */

@@ -66,4 +66,12 @@ export function keyedUniform(...parts: number[]): number {
 export const RNG_STREAM = {
   aiLaunch: 0xa1a0c4,
   critical: 0xc217,
+  /** v0.4.1: launch placement / heading / tilt / energy variation. */
+  launchGeometry: 0x1a7c4,
+  /** v0.4.1: AI launch aim. */
+  aiAim: 0xa1a1a,
+  /** v0.4.1: stadium floor micro-relief and friction variation. */
+  floor: 0xf100c,
+  /** v0.4.1: per-top contact wander frequencies / phases. */
+  wander: 0x3a9de,
 } as const;

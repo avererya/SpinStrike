@@ -134,8 +134,16 @@ export const BASE_REWARDS: Record<RankTier, { credits: number; xp: number }> = {
 export type Difficulty = 'easy' | 'normal' | 'hard' | 'expert';
 export const DIFFICULTIES: readonly Difficulty[] = ['easy', 'normal', 'hard', 'expert'];
 export const DIFFICULTY_LABEL: Record<Difficulty, string> = { easy: 'Easy', normal: 'Normal', hard: 'Hard', expert: 'Expert' };
-/** Reward multiplier in percent (APPROVED values; Expert generosity is under review). */
-export const DIFFICULTY_REWARD_PERCENT: Record<Difficulty, number> = { easy: 50, normal: 100, hard: 150, expert: 200 };
+/**
+ * Reward multiplier in percent. v0.4.1 TEMPORARY values (approved): difficulty
+ * currently changes only the AI's launch quality, and simulated win rates
+ * barely move with it (≈ 90 % Easy / 89 % Normal / 90 % Expert in v0.4.0),
+ * so the v0.4.0 multipliers (50 / 100 / 150 / 200 %) over-rewarded Expert.
+ * To be revisited in v0.5 with tactical AI. Applies to Credits and XP.
+ */
+export const DIFFICULTY_REWARD_PERCENT: Record<Difficulty, number> = { easy: 75, normal: 100, hard: 110, expert: 120 };
+/** v0.4.0 multipliers, kept for documentation and comparison only. */
+export const V040_DIFFICULTY_REWARD_PERCENT: Readonly<Record<Difficulty, number>> = { easy: 50, normal: 100, hard: 150, expert: 200 };
 /**
  * AI launch-quality distributions per difficulty (PROVISIONAL). Difficulty
  * changes only how well the AI launches; it never changes opponent stats.

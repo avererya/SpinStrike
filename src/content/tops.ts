@@ -30,7 +30,7 @@ export const STARTER_TOPS: readonly TopDefinition[] = [
     name: 'Inferno',
     topClass: 'Attack',
     description: 'Aggressive flat-tip attacker that sweeps the bowl and burns its own spin to hit hard.',
-    stats: { health: 63, attack: 95, defense: 35, stamina: 62, speed: 85, weight: 50 },
+    stats: { health: 60, attack: 95, defense: 35, stamina: 64, speed: 90, weight: 50 },
     parts: { core: 'core-flame', ring: 'blaze-fang', disc: 'spoke-6', tip: 'rush-flat' },
     palette: { primary: 0xc8191e, secondary: 0x141414, accent: 0xff7a1a, metal: 0xc9ccd2 },
     spinDirection: 1,
@@ -40,7 +40,7 @@ export const STARTER_TOPS: readonly TopDefinition[] = [
     name: 'Titan',
     topClass: 'Defense',
     description: 'Heavy armoured ball-tip defender that settles in the centre and shrugs off hits.',
-    stats: { health: 72, attack: 82, defense: 82, stamina: 60, speed: 30, weight: 95 },
+    stats: { health: 80, attack: 55, defense: 90, stamina: 70, speed: 30, weight: 95 },
     parts: { core: 'core-shield', ring: 'aegis-wall', disc: 'heavy-solid', tip: 'bastion-ball' },
     palette: { primary: 0x1f56c9, secondary: 0x0c1e45, accent: 0x7fb4ff, metal: 0xd4d8de },
     spinDirection: 1,
@@ -50,7 +50,7 @@ export const STARTER_TOPS: readonly TopDefinition[] = [
     name: 'Tempest',
     topClass: 'Stamina',
     description: 'Smooth, efficient needle-tip spinner built to outlast everything.',
-    stats: { health: 63, attack: 40, defense: 65, stamina: 75, speed: 50, weight: 55 },
+    stats: { health: 65, attack: 40, defense: 45, stamina: 95, speed: 55, weight: 55 },
     parts: { core: 'core-leaf', ring: 'zephyr-halo', disc: 'outer-rim', tip: 'needle-point' },
     palette: { primary: 0x0f9a5c, secondary: 0x0a3d2a, accent: 0xe2b33c, metal: 0xd8c78f },
     spinDirection: 1,
@@ -60,7 +60,7 @@ export const STARTER_TOPS: readonly TopDefinition[] = [
     name: 'Phantom',
     topClass: 'Balance',
     description: 'Well-rounded semi-flat all-rounder with no extreme strengths or weaknesses.',
-    stats: { health: 69, attack: 72, defense: 65, stamina: 67, speed: 65, weight: 65 },
+    stats: { health: 65, attack: 67, defense: 56, stamina: 66, speed: 65, weight: 65 },
     parts: { core: 'core-crescent', ring: 'eclipse-wing', disc: 'notch-8', tip: 'vector-semi' },
     palette: { primary: 0x6a2fc0, secondary: 0x121018, accent: 0xb9a7e8, metal: 0xc3c6cf },
     spinDirection: 1,
@@ -76,6 +76,17 @@ export const LEGACY_V02_STATS: Readonly<Record<string, GameplayStats>> = {
   titan: { health: 90, attack: 40, defense: 95, stamina: 65, speed: 30, weight: 95 },
   tempest: { health: 60, attack: 35, defense: 50, stamina: 100, speed: 50, weight: 55 },
   phantom: { health: 65, attack: 65, defense: 65, stamina: 65, speed: 65, weight: 65 },
+};
+
+/**
+ * v0.3.1 – v0.4.0 starter stats, kept for the 'v0.3' ruleset (the v0.4.0
+ * baseline path). v0.4.1 stats live in STARTER_TOPS.
+ */
+export const LEGACY_V040_STATS: Readonly<Record<string, GameplayStats>> = {
+  inferno: { health: 63, attack: 95, defense: 35, stamina: 62, speed: 85, weight: 50 },
+  titan: { health: 72, attack: 82, defense: 82, stamina: 60, speed: 30, weight: 95 },
+  tempest: { health: 63, attack: 40, defense: 65, stamina: 75, speed: 50, weight: 55 },
+  phantom: { health: 69, attack: 72, defense: 65, stamina: 67, speed: 65, weight: 65 },
 };
 
 export function getTop(id: string): TopDefinition {

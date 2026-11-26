@@ -52,12 +52,12 @@ describe('v0.3.1 reusable ring characteristics', () => {
   });
 
   it('Zephyr Halo carries the deflective profile and its spin-scrubbing cost; others stay neutral', () => {
-    const t = deriveTopPhysics(getTop('tempest'));
+    const t = deriveTopPhysics(getTop('tempest'), { ruleset: 'v0.3' });
     expect(t.damageCapFactor).toBe(RINGS['zephyr-halo']!.damageCapFactor);
     expect(t.damageCapFactor).toBeLessThan(1);
     expect(t.impactSpinLossFactor).toBeGreaterThan(1);
     for (const id of ['inferno', 'titan', 'phantom']) {
-      const p = deriveTopPhysics(getTop(id));
+      const p = deriveTopPhysics(getTop(id), { ruleset: 'v0.3' });
       expect(p.damageCapFactor).toBe(1);
       expect(p.impactSpinLossFactor).toBe(1);
     }

@@ -14,6 +14,8 @@ import { LAUNCH_QUALITY_LABEL, meterPosition, playerLaunchQuality, type TopLaunc
 import { BUILD_ID, VERSION_LABEL } from '../version';
 import type { BattleResult } from '../sim/battle';
 import type { CareerBattleSetup } from '../career/battle';
+import { AimPanel } from './aimPanel';
+import type { LaunchAim } from '../sim/launchGeometry';
 
 /**
  * Hooks of a career battle (v0.4). The stage knows nothing about rewards:
@@ -27,6 +29,8 @@ export interface CareerBattleHooks {
   onAgain(): void;
   /** Return to Garage, or quit an unfinished battle (no rewards). */
   onExit(finished: boolean): void;
+  /** v0.4.1: the player confirmed a launch aim (saved per owned top). */
+  onAim?(aim: LaunchAim): void;
 }
 
 /** Presentation timings (real seconds). Never affect the simulated result. */
@@ -54,7 +58,7 @@ interface DamageNumber {
   maxLife: number;
 }
 
-type Status = 'ready' | 'launching' | 'running' | 'paused' | 'finished';
+type Status = 'ready' | 'aiming' | 'launching' | 'running' | 'paused' | 'finished';
 
 /**
  * Sandbox application: wires the simulation, renderer and DOM UI together.
@@ -131,6 +135,7 @@ export class SandboxApp {
   private readonly launchBtn: HTMLButtonElement;
   private readonly launchMsg: HTMLElement;
   private readonly launchOpp: HTMLElement;
+  private readonly aimPanel = new AimPanel();
 
   constructor(private readonly root: HTMLElement) {
     this.canvas = el('canvas', { class: 'stage-canvas', 'aria-label': 'Battle stadium' });
@@ -249,7 +254,7 @@ export class SandboxApp {
 
     this.stats = el('pre', { class: 'stats' });
     this.errorBox = el('div', { class: 'error-box' });
-    this.stage = el('main', { class: 'stage' }, [this.canvas, this.dmgLayer, this.hud.root, this.banner, this.launchBox, this.result, this.quitBox, this.stats, this.errorBox]);
+    this.stage = el('main', { class: 'stage' }, [this.canvas, this.dmgLayer, this.hud.root, this.banner, this.aimPanel.root, this.launchBox, this.result, this.quitBox, this.stats, this.errorBox]);
 
     this.dev = new DevPanel({
       onConfigChange: (c) => {
@@ -288,7 +293,8 @@ export class SandboxApp {
       if (e.code === 'Space') {
         e.preventDefault();
         if (e.repeat) return;
-        if (this.status === 'launching') this.pressLaunch();
+        if (this.status === 'aiming') this.proceedAim(this.aimPanel.current);
+        else if (this.status === 'launching') this.pressLaunch();
         else if (this.career) {
           if (this.status === 'running' || this.status === 'paused') this.togglePause();
         } else if (this.status === 'ready' || this.status === 'finished') this.startBattle();
@@ -364,6 +370,7 @@ export class SandboxApp {
     this.resultShown = false;
     this.result.classList.remove('show', 'career');
     this.hideLaunch();
+    this.aimPanel.hide();
     this.finishClock = -1;
     this.bannerShown = false;
     this.banner.className = 'finish-banner';
@@ -420,7 +427,33 @@ export class SandboxApp {
     return this.config.launch.minigame && this.config.launch.playerQuality === 'auto';
   }
 
+  /** v0.4.1: the aim step is shown before the timing minigame when natural movement variation is on. */
+  private needsAim(): boolean {
+    return this.needsMinigame() && this.config.movement.naturalVariation;
+  }
+
   private beginLaunch(): void {
+    if (this.needsAim()) {
+      this.status = 'aiming';
+      const defs = [getTop(this.config.player.topId), getTop(this.config.opponent.topId)];
+      this.aimPanel.show(buildBattleOptions(this.config), this.config.launch.playerAim, [hex(defs[0]!.palette.accent), hex(defs[1]!.palette.accent)], (aim) => this.proceedAim(aim));
+      this.updateButtons();
+      return;
+    }
+    this.beginTiming();
+  }
+
+  /** The player confirmed the aim: rebuild with it (tops re-placed) and open the timing minigame. */
+  private proceedAim(aim: LaunchAim): void {
+    if (this.status !== 'aiming') return;
+    this.aimPanel.hide();
+    this.config = { ...this.config, launch: { ...this.config.launch, playerAim: { ...aim } } };
+    this.career?.hooks.onAim?.(aim);
+    this.rebuild(false, !this.career);
+    this.beginTiming();
+  }
+
+  private beginTiming(): void {
     if (!this.needsMinigame()) {
       // Bypass: qualities come from the fixed settings / seeded distribution.
       this.launchWith(autoLaunches(this.config), LAUNCH_REVEAL_BYPASS);
@@ -524,7 +557,7 @@ export class SandboxApp {
   }
 
   private updateButtons(): void {
-    this.startBtn.disabled = this.status === 'running' || this.status === 'paused' || this.status === 'launching';
+    this.startBtn.disabled = this.status === 'running' || this.status === 'paused' || this.status === 'launching' || this.status === 'aiming';
     this.startBtn.textContent = this.status === 'finished' ? 'Again' : 'Start';
     this.pauseBtn.disabled = !(this.status === 'running' || this.status === 'paused');
     this.pauseBtn.textContent = this.status === 'paused' ? 'Resume' : 'Pause';
@@ -669,6 +702,14 @@ export class SandboxApp {
         `cpu/step ${(this.stepMs * 1000).toFixed(1)} µs`,
         `guard trips ${this.battle.world.bodies.reduce((a, b) => a + b.guardTrips, 0)}`,
         `energy ${this.battle.world.totalEnergy().toFixed(3)} J`,
+      );
+      const w = this.battle.world;
+      const t = w.telemetry.summary(w.steps);
+      const f = (x: number | null) => (x === null ? '–' : `${x.toFixed(1)} s`);
+      lines.push(
+        `contacts ${t.contacts}  hits ${t.damagingHits}  repeat ${t.repeatedImpacts}`,
+        `1st contact ${f(t.firstContact)}  1st hit ${f(t.firstHit)}`,
+        `longest gap ${t.longestGap.toFixed(1)} s  sync ${t.syncTime.toFixed(1)} s (max ${t.longestSync.toFixed(1)})`,
       );
     }
     this.stats.textContent = lines.join('\n');
