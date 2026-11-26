@@ -53,12 +53,24 @@ export interface DeriveOptions {
   ruleset?: Ruleset;
   /** Stats to derive from (e.g. upgraded stats). Defaults to the ruleset's base stats. */
   stats?: GameplayStats;
+  /** Critical chance (0–1) replacing the base chance (career upgrades). */
+  critChance?: number;
 }
 
 /** Global baseline launch spin energy, J (provisional). */
 export const BASE_LAUNCH_SPIN_ENERGY = 2.6;
 
 const t = (v: number) => Math.min(100, Math.max(0, v)) / 100;
+
+/**
+ * v0.3 mapping input ceiling (v0.4). Design stats are 0–100, but permanent
+ * upgrades can lift an effective stat above 100 (e.g. Inferno speed 85 +25 %
+ * = 106). The v0.3 mapping continues LINEARLY up to this ceiling instead of
+ * saturating at 100, so every upgrade rank keeps a real physical effect.
+ * Stats ≤ 100 (every unupgraded top) map exactly as in v0.3.1.
+ */
+export const STAT_MAPPING_CEILING = 150;
+const tUp = (v: number) => Math.min(STAT_MAPPING_CEILING, Math.max(0, v)) / 100;
 
 /**
  * v0.2 mapping (unchanged):
@@ -127,35 +139,35 @@ function derivePhysicsV03(s: GameplayStats, p: ResolvedParts, spinDirection: 1 |
   const { ring, disc, tip } = p;
   const P = PARAMS_V03;
   const tipStability = tip.stability ?? 0.5;
-  const stability = Math.min(0.95, Math.max(0.05, tipStability + lerp(P.stabilityWeight[0], P.stabilityWeight[1], t(s.weight))));
+  const stability = Math.min(0.95, Math.max(0.05, tipStability + lerp(P.stabilityWeight[0], P.stabilityWeight[1], tUp(s.weight))));
   return {
-    mass: lerp(0.03, 0.058, t(s.weight)),
+    mass: lerp(0.03, 0.058, tUp(s.weight)),
     radius: ring.radius,
     gyration: disc.gyration,
     comHeight: 0.016,
     contactHeight: 0.021,
     tipDriveRadius: tip.driveRadius,
     axisSettleRate: 0,
-    tipTraction: tip.traction * lerp(0.85, 1.2, t(s.speed)),
+    tipTraction: tip.traction * lerp(0.85, 1.2, tUp(s.speed)),
     tipSpinFriction: tip.spinFrictionV03 ?? tip.spinFriction,
     tipSpinRadius: tip.spinRadius,
     airDrag: 4e-9,
-    spinDecay: lerp(P.spinDecay[0], P.spinDecay[1], t(s.stamina)),
+    spinDecay: lerp(P.spinDecay[0], P.spinDecay[1], tUp(s.stamina)),
     rollingResistance: 0.08,
     stability,
     baseWobble: tip.rock,
     wobbleIntensity: 0.35,
-    restitution: lerp(P.restitution[0], P.restitution[1], t(s.defense)),
-    contactFriction: lerp(P.contactFriction[0], P.contactFriction[1], t(s.attack)) * ring.frictionFactor,
-    ringStrike: (ring.strikeV03 ?? ring.strike) * lerp(P.ringStrike[0], P.ringStrike[1], t(s.attack)),
+    restitution: lerp(P.restitution[0], P.restitution[1], tUp(s.defense)),
+    contactFriction: lerp(P.contactFriction[0], P.contactFriction[1], tUp(s.attack)) * ring.frictionFactor,
+    ringStrike: (ring.strikeV03 ?? ring.strike) * lerp(P.ringStrike[0], P.ringStrike[1], tUp(s.attack)),
     bladeExposure: ring.bladeExposure ?? 1,
     impactSpinLossFactor: ring.impactSpinLossFactor ?? 1,
     damageCapFactor: ring.damageCapFactor ?? 1,
-    impactSpinDrain: lerp(P.impactSpinDrain[0], P.impactSpinDrain[1], t(s.attack)),
-    impactSpinResist: lerp(P.impactSpinResist[0], P.impactSpinResist[1], t(s.stamina)),
+    impactSpinDrain: lerp(P.impactSpinDrain[0], P.impactSpinDrain[1], tUp(s.attack)),
+    impactSpinResist: lerp(P.impactSpinResist[0], P.impactSpinResist[1], tUp(s.stamina)),
     spinDirection,
     launchSpinEnergy: BASE_LAUNCH_SPIN_ENERGY,
-    launchSpeed: lerp(0.3, 1.1, t(s.speed)),
+    launchSpeed: lerp(0.3, 1.1, tUp(s.speed)),
   };
 }
 
@@ -182,7 +194,7 @@ export function deriveTopCombat(def: TopDefinition, opts: DeriveOptions = {}): T
     maxHealth: Math.max(1, s.health) * HEALTH_PER_STAT,
     attack: Math.max(0, s.attack),
     defense: Math.max(0, s.defense),
-    critChance: BASE_CRIT_CHANCE,
+    critChance: opts.critChance ?? BASE_CRIT_CHANCE,
     critMultiplier: BASE_CRIT_MULTIPLIER,
   };
 }

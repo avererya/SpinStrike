@@ -12,6 +12,22 @@ import { formatBonus, formatHealth, formatStamina } from './format';
 import { FINISH_LABEL, describeResult } from './resultText';
 import { LAUNCH_QUALITY_LABEL, meterPosition, playerLaunchQuality, type TopLaunch } from '../sim/launch';
 import { BUILD_ID, VERSION_LABEL } from '../version';
+import type { BattleResult } from '../sim/battle';
+import type { CareerBattleSetup } from '../career/battle';
+
+/**
+ * Hooks of a career battle (v0.4). The stage knows nothing about rewards:
+ * the shell settles the result exactly once in `onFinished` and returns the
+ * summary to display.
+ */
+export interface CareerBattleHooks {
+  /** Called once when the result is decided. Returns the rewards panel to show in the result card. */
+  onFinished(result: BattleResult): HTMLElement | null;
+  /** "Battle Again": the shell prepares a fresh opponent + seed and calls startCareerBattle again. */
+  onAgain(): void;
+  /** Return to Garage, or quit an unfinished battle (no rewards). */
+  onExit(finished: boolean): void;
+}
 
 /** Presentation timings (real seconds). Never affect the simulated result. */
 const SLOWMO_FACTOR = 0.3;
@@ -77,6 +93,18 @@ export class SandboxApp {
   /** Minigame clock (real seconds) and reveal countdown. */
   private launchClock = 0;
   private revealClock = -1;
+  /** Career battle in progress (null in sandbox mode). */
+  private career: { setup: CareerBattleSetup; hooks: CareerBattleHooks; finished: boolean; label: string } | null = null;
+  /** Sandbox configuration kept while a career battle uses `config`. */
+  private sandboxConfig: SandboxConfig | null = null;
+  private active = true;
+  private loopRunning = false;
+  /** Set by the shell: leaves the sandbox. */
+  onExitSandbox: (() => void) | null = null;
+  private readonly careerBar: HTMLElement;
+  private readonly careerLabel: HTMLElement;
+  private readonly careerPause: HTMLButtonElement;
+  private readonly quitBox: HTMLElement;
 
   // DOM
   private readonly stage: HTMLElement;
@@ -137,8 +165,11 @@ export class SandboxApp {
       this.onConfigEdited();
     });
 
-    const toolbar = el('header', { class: 'toolbar' }, [
-      el('div', { class: 'brand' }, [el('span', { class: 'logo', text: 'SpinStrike' }), el('span', { class: 'tag', text: VERSION_LABEL, title: `Build ${BUILD_ID}` })]),
+    const menuBtn = el('button', { class: 'btn', title: 'Back to the main menu' }, ['◀', el('span', { class: 'btn-label', text: ' Menu' })]);
+    menuBtn.addEventListener('click', () => this.onExitSandbox?.());
+    const toolbar = el('header', { class: 'toolbar sandbox-toolbar' }, [
+      menuBtn,
+      el('div', { class: 'brand' }, [el('span', { class: 'logo', text: 'SpinStrike Sandbox' }), el('span', { class: 'tag', text: VERSION_LABEL, title: `Build ${BUILD_ID}` })]),
       el('div', { class: 'tb-group picks' }, [
         el('label', { class: 'pick' }, [el('span', { text: 'Player' }), this.playerSel]),
         el('span', { class: 'vs', text: 'vs' }),
@@ -195,9 +226,30 @@ export class SandboxApp {
       el('div', { class: 'launch-hint', text: 'Stop the marker in the centre · Space or tap' }),
     ]);
 
+    // Career battle bar (replaces the sandbox toolbar in career battles).
+    const quitBtn = el('button', { class: 'btn small', text: '✕ Quit' });
+    this.careerPause = el('button', { class: 'btn small', text: 'Pause' });
+    this.careerLabel = el('div', { class: 'career-label' });
+    quitBtn.addEventListener('click', () => this.quitBox.classList.add('show'));
+    this.careerPause.addEventListener('click', () => this.togglePause());
+    this.careerBar = el('header', { class: 'career-bar' }, [quitBtn, this.careerLabel, this.careerPause]);
+    const quitYes = el('button', { class: 'btn primary', text: 'Quit battle' });
+    const quitNo = el('button', { class: 'btn', text: 'Keep fighting' });
+    this.quitBox = el('div', { class: 'quit-box', role: 'dialog' }, [
+      el('div', { class: 'quit-title', text: 'Quit this battle?' }),
+      el('div', { class: 'quit-text', text: 'An abandoned battle earns no Credits, XP or rank progress.' }),
+      el('div', { class: 'btn-row' }, [quitYes, quitNo]),
+    ]);
+    quitNo.addEventListener('click', () => this.quitBox.classList.remove('show'));
+    quitYes.addEventListener('click', () => {
+      this.quitBox.classList.remove('show');
+      const c = this.career;
+      if (c) c.hooks.onExit(false);
+    });
+
     this.stats = el('pre', { class: 'stats' });
     this.errorBox = el('div', { class: 'error-box' });
-    this.stage = el('main', { class: 'stage' }, [this.canvas, this.dmgLayer, this.hud.root, this.banner, this.launchBox, this.result, this.stats, this.errorBox]);
+    this.stage = el('main', { class: 'stage' }, [this.canvas, this.dmgLayer, this.hud.root, this.banner, this.launchBox, this.result, this.quitBox, this.stats, this.errorBox]);
 
     this.dev = new DevPanel({
       onConfigChange: (c) => {
@@ -212,7 +264,7 @@ export class SandboxApp {
         this.updateOverlays();
       },
     });
-    this.root.append(toolbar, this.stage, this.dev.root);
+    this.root.append(toolbar, this.careerBar, this.stage, this.dev.root);
   }
 
   start(): void {
@@ -232,16 +284,63 @@ export class SandboxApp {
     this.resize();
     window.addEventListener('keydown', (e) => {
       if ((e.target as HTMLElement).closest('input, textarea, select')) return;
+      if (!this.active) return;
       if (e.code === 'Space') {
         e.preventDefault();
         if (e.repeat) return;
         if (this.status === 'launching') this.pressLaunch();
-        else if (this.status === 'ready' || this.status === 'finished') this.startBattle();
+        else if (this.career) {
+          if (this.status === 'running' || this.status === 'paused') this.togglePause();
+        } else if (this.status === 'ready' || this.status === 'finished') this.startBattle();
         else this.togglePause();
-      } else if (e.key === 'r') this.replay();
+      } else if (e.key === 'r' && !this.career) this.replay();
     });
     this.lastTime = performance.now();
+    this.loopRunning = true;
     requestAnimationFrame(this.frame);
+  }
+
+  /** Pauses rendering and simulation while the stage is not on screen (saves battery). */
+  setActive(on: boolean): void {
+    this.active = on;
+    if (on && !this.loopRunning && this.renderer) {
+      this.loopRunning = true;
+      this.lastTime = performance.now();
+      requestAnimationFrame(this.frame);
+    }
+    if (on) this.resize();
+  }
+
+  /** Sandbox mode: restores the sandbox configuration (never career data). */
+  enterSandbox(): void {
+    this.career = null;
+    if (this.sandboxConfig) {
+      this.config = this.sandboxConfig;
+      this.sandboxConfig = null;
+    }
+    this.root.classList.remove('career-battle');
+    this.quitBox.classList.remove('show');
+    this.playerSel.value = this.config.player.topId;
+    this.oppSel.value = this.config.opponent.topId;
+    this.launches = null;
+    this.rebuild(false);
+  }
+
+  /**
+   * Career mode: runs `config` (built by the career layer, never a sandbox
+   * config) and reports the result through `hooks`. The sandbox
+   * configuration is kept aside untouched.
+   */
+  startCareerBattle(setup: CareerBattleSetup, config: SandboxConfig, hooks: CareerBattleHooks, label: string): void {
+    if (!this.sandboxConfig && !this.career) this.sandboxConfig = this.config;
+    this.career = { setup, hooks, finished: false, label };
+    this.config = config;
+    this.launches = null;
+    this.root.classList.add('career-battle');
+    this.quitBox.classList.remove('show');
+    this.careerLabel.textContent = label;
+    this.rebuild(false);
+    this.beginLaunch();
   }
 
   /**
@@ -263,7 +362,7 @@ export class SandboxApp {
     this.hud.update(this.battle);
     this.status = startNow ? 'running' : 'ready';
     this.resultShown = false;
-    this.result.classList.remove('show');
+    this.result.classList.remove('show', 'career');
     this.hideLaunch();
     this.finishClock = -1;
     this.bannerShown = false;
@@ -429,6 +528,8 @@ export class SandboxApp {
     this.startBtn.textContent = this.status === 'finished' ? 'Again' : 'Start';
     this.pauseBtn.disabled = !(this.status === 'running' || this.status === 'paused');
     this.pauseBtn.textContent = this.status === 'paused' ? 'Resume' : 'Pause';
+    this.careerPause.disabled = !(this.status === 'running' || this.status === 'paused');
+    this.careerPause.textContent = this.status === 'paused' ? 'Resume' : 'Pause';
     this.root.dataset.status = this.status;
   }
 
@@ -442,6 +543,10 @@ export class SandboxApp {
   }
 
   private frame = (now: number): void => {
+    if (!this.active) {
+      this.loopRunning = false;
+      return;
+    }
     const dt = Math.min(0.25, Math.max(0, (now - this.lastTime) / 1000));
     this.lastTime = now;
     if (dt > 0) this.fps += (1 / dt - this.fps) * 0.08;
@@ -616,6 +721,22 @@ export class SandboxApp {
       b.addEventListener('click', fn);
       return b;
     };
+    const car = this.career;
+    if (car) {
+      // Career: settle rewards exactly once, then show them above the statistics.
+      let panel: HTMLElement | null = null;
+      if (!car.finished) {
+        car.finished = true;
+        panel = car.hooks.onFinished(r);
+      }
+      if (panel) this.resultTable.prepend(panel);
+      const again = btn('Battle Again', 'primary', () => car.hooks.onAgain(), 'Fight a fresh opponent with a new seed');
+      const home = btn('Return to Garage', '', () => car.hooks.onExit(true));
+      this.resultButtons.replaceChildren(again, home);
+      this.result.classList.add('show', 'career');
+      return;
+    }
+    this.result.classList.remove('career');
     const close = btn('Close', '', () => this.result.classList.remove('show'));
     const replay = btn('Replay (same seed)', '', () => this.replay(), 'Exact replay: same seed and launch');
     const fresh = btn(r.outcome.kind === 'draw' ? 'Rematch' : 'New battle', 'primary', () => this.freshBattle(), 'Same tops, new seed, fresh launch');

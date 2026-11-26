@@ -189,3 +189,16 @@ Launch minigame, seeded AI launch quality, critical hits, spin-finish draw windo
 **Status after v0.3.1:** Inferno vs Tempest ≈ 70 %, Titan vs Tempest ≈ 30 %, draws 2.3 % (mirrors 1–8 %). Tempest's ring is a deflective profile (`damageCapFactor` 0.45, `impactSpinLossFactor` 1.5), reusable for future equipment; its stats were lowered (health 63, stamina 75) to keep Titan and Phantom competitive. [Implementation assumption]
 
 **Status after v0.3:** Titan vs Inferno/Tempest and the Phantom matchups are close to target; Inferno vs Tempest is ≈ 94 % (target 65 %). Draw rates in mirrors are high at 0.25 s (consider 0.1 s).
+
+
+## v0.4 scope: progression foundation [Confirmed, delivered]
+
+Approved design requirements and provisional values are listed separately in `docs/PROGRESSION.md`.
+
+**Loop:** Garage → Quick Battle → rewards → upgrade → level up → advance career.
+
+**Approved:** one currency (Credits); account-wide career rank vs per-top level/XP/upgrades; levels 1-30 with XP 100 + 25(L-1); six attributes x ten ranks with costs 100/200/350/500/750/1000/1500/2000/3000/4500 (Common) and rarity multipliers 1/1.25/1.5/2; rank-10 bonuses Health +50 %, Attack +40 %, Defense +40 %, Stamina +30 %, Speed +25 %, Crit +20 points (5 % to 25 %); level gates for upgrade ranks (L1:2, L5:4, L10:6, L15:8, L20:9, L25:10); rewards by rank tier and difficulty multipliers; outcome shares (win 100 %, defeat 5 %/10 %, draw 15 %/25 %, quit 0); no energy, repair costs, premium currency or progression loss.
+
+**Provisional:** 500 starting Credits; Bronze win requirements 10/20/30; difficulty launch distributions; Bronze opponent build bands; Expert 2x multiplier (under review); the stat-mapping ceiling of 150.
+
+**Future (not implemented):** equipment, signature abilities (levels 10 and 20 reserved), shop, more tops and stadiums, championships, bosses, achievements, cosmetics, multiplayer.
