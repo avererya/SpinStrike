@@ -177,6 +177,18 @@ export function cloneConfig(c: SandboxConfig): SandboxConfig {
   return JSON.parse(JSON.stringify(c)) as SandboxConfig;
 }
 
+/**
+ * Rematch (e.g. after a draw): same tops and configuration, a fresh battle
+ * seed. The AI launch quality is re-drawn from the new seed and the player
+ * launches again. (An exact replay instead keeps the seed and the recorded
+ * launches.)
+ */
+export function rematchConfig(c: SandboxConfig, newSeed: number): SandboxConfig {
+  const r = cloneConfig(c);
+  r.seed = newSeed >>> 0;
+  return r;
+}
+
 const COMBAT_OVERRIDE_KEYS = new Set<string>(['maxHealth', 'attack', 'defense', 'critChance', 'critMultiplier']);
 
 /** Effective physics params for a slot: definition-derived values + overrides. */

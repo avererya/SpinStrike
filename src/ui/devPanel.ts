@@ -1,6 +1,22 @@
 import { STARTER_TOPS, getTop } from '../content/tops';
-import { COLLISION_PARAMS, COMBAT_PARAMS, SIM_LIMITS, STADIUM_PARAMS, TOP_COMBAT_PARAMS, TOP_PARAMS, type ParamSpec } from '../config/params';
-import { defaultConfig, resolveTopCombat, resolveTopParams, type SandboxConfig } from '../config/sandboxConfig';
+import {
+  AI_LAUNCH_PARAMS,
+  COLLISION_PARAMS,
+  COMBAT_PARAMS,
+  LAUNCH_BONUS_PARAMS,
+  LAUNCH_PARAMS,
+  LAUNCH_ZONE_PARAMS,
+  RESULT_PARAMS,
+  SIM_LIMITS,
+  STADIUM_PARAMS,
+  TOP_COMBAT_PARAMS,
+  TOP_PARAMS,
+  type ParamSpec,
+} from '../config/params';
+import { defaultConfig, legacyV02Config, resolveTopCombat, resolveTopParams, type FixedQuality, type SandboxConfig } from '../config/sandboxConfig';
+import { RULESETS, type Ruleset } from '../content/derive';
+import { LAUNCH_QUALITIES, LAUNCH_QUALITY_LABEL, type LaunchQuality } from '../sim/launch';
+import { BUILD_ID, BUILD_TIME, VERSION_LABEL } from '../version';
 import { parseConfigJson } from '../config/validate';
 import type { DebugFlags } from '../render/debugDraw';
 import { el } from './dom';
@@ -40,7 +56,10 @@ export class DevPanel {
     const close = el('button', { class: 'icon-btn', 'aria-label': 'Close developer panel', text: '✕' });
     close.addEventListener('click', () => this.setOpen(false));
     this.root = el('aside', { class: 'dev-panel', 'aria-label': 'Developer panel' }, [
-      el('div', { class: 'dev-header' }, [el('h2', { text: 'Developer' }), close]),
+      el('div', { class: 'dev-header' }, [
+        el('div', {}, [el('h2', { text: 'Developer' }), el('div', { class: 'dev-version', text: `SpinStrike ${VERSION_LABEL}`, title: `Build ${BUILD_ID}${BUILD_TIME ? ` · ${BUILD_TIME}` : ''}` })]),
+        close,
+      ]),
       this.body,
     ]);
   }
@@ -64,6 +83,62 @@ export class DevPanel {
     );
 
     b.append(this.section('Debug visualisation', this.debugToggles()));
+    const L = config.launch;
+    const ruleset = this.select(
+      'Ruleset (stats & stat → physics mapping)',
+      RULESETS.map((r) => ({ value: r, label: r === 'v0.2' ? 'v0.2 legacy' : `${r} (current)` })),
+      config.ruleset,
+      (v) => {
+        config.ruleset = v as Ruleset;
+        this.commit();
+      },
+    );
+    const legacyBtn = el('button', { class: 'btn small', text: 'Load legacy v0.2 configuration', title: 'v0.2 ruleset and combat values, no crits, Poor launches, no draw window: reproduces v0.2 battles' });
+    legacyBtn.addEventListener('click', () => {
+      const d = legacyV02Config(this.config.seed);
+      d.player.topId = this.config.player.topId;
+      d.opponent.topId = this.config.opponent.topId;
+      this.config = d;
+      this.commit();
+      this.flash('Legacy v0.2 configuration loaded.');
+    });
+    b.append(this.section('Ruleset', [ruleset, el('div', { class: 'btn-row' }, [legacyBtn])]));
+    const qOptions = (auto: string) => [
+      { value: 'auto', label: auto },
+      ...LAUNCH_QUALITIES.map((q) => ({ value: q, label: `${LAUNCH_QUALITY_LABEL[q]} (${config.launch.bonuses[q]}×)` })),
+    ];
+    b.append(
+      this.section('Launch', [
+        el('p', { class: 'dev-note', text: 'Launch quality multiplies starting ROTATIONAL ENERGY (ω = √(2E/I)). Zone boundaries count toward the better quality.' }),
+        this.checkbox('Launch minigame (off = bypass)', L.minigame, (v) => {
+          L.minigame = v;
+          this.commit();
+        }),
+        this.select('Player launch quality', qOptions('Minigame / seeded'), L.playerQuality, (v) => {
+          L.playerQuality = v as FixedQuality;
+          this.commit();
+        }),
+        this.select('Opponent launch quality', qOptions('AI distribution (seeded)'), L.opponentQuality, (v) => {
+          L.opponentQuality = v as FixedQuality;
+          this.commit();
+        }),
+        ...LAUNCH_PARAMS.map((sp) => this.slider(sp, L[sp.key], (v) => (L[sp.key] = v))),
+        ...LAUNCH_ZONE_PARAMS.map((sp) =>
+          this.slider(sp, L.zones[sp.key], (v) => {
+            L.zones[sp.key] = v;
+            // Keep perfect < great < good.
+            const z = L.zones;
+            if (sp.key === 'perfect') { z.great = Math.max(z.great, v + 0.005); z.good = Math.max(z.good, z.great + 0.005); }
+            if (sp.key === 'great') { z.perfect = Math.min(z.perfect, v - 0.005); z.good = Math.max(z.good, v + 0.005); }
+            if (sp.key === 'good') { z.great = Math.min(z.great, v - 0.005); z.perfect = Math.min(z.perfect, z.great - 0.005); }
+            for (const k of ['perfect', 'great', 'good'] as const) z[k] = Math.min(0.5, Math.max(0.005, Math.round(z[k] * 1000) / 1000));
+          }),
+        ),
+        ...LAUNCH_BONUS_PARAMS.map((sp) => this.slider(sp, L.bonuses[sp.key], (v) => (L.bonuses[sp.key] = v))),
+        el('p', { class: 'dev-note', text: 'AI distribution: editing one probability rescales the others so they sum to 1.' }),
+        ...AI_LAUNCH_PARAMS.map((sp) => this.slider(sp, L.aiDistribution[sp.key], (v) => renormalise(L.aiDistribution, sp.key, v))),
+      ]),
+    );
     b.append(
       this.section('Stadium · Classic Bowl', STADIUM_PARAMS.map((s) => this.slider(s, config.stadium[s.key], (v) => (config.stadium[s.key] = v)))),
     );
@@ -78,7 +153,14 @@ export class DevPanel {
           config.combat.knockouts = v;
           this.commit();
         }),
+        this.checkbox('Critical hits (chance and multiplier are per top, below)', config.combat.criticalHits, (v) => {
+          config.combat.criticalHits = v;
+          this.commit();
+        }),
       ]),
+    );
+    b.append(
+      this.section('Results · draws & narrow victories', RESULT_PARAMS.map((sp) => this.slider(sp, config.results[sp.key], (v) => (config.results[sp.key] = v)))),
     );
     b.append(
       this.section('Presentation', [
@@ -88,6 +170,10 @@ export class DevPanel {
         }),
         this.checkbox('Floating damage numbers', config.presentation.damageNumbers, (v) => {
           config.presentation.damageNumbers = v;
+          this.commit();
+        }),
+        this.checkbox('Critical hit effects (golden numbers, label, sparks)', config.presentation.criticalEffects, (v) => {
+          config.presentation.criticalEffects = v;
           this.commit();
         }),
       ]),
@@ -103,8 +189,8 @@ export class DevPanel {
     );
     for (const side of ['player', 'opponent'] as const) {
       const slot = config[side];
-      const eff = resolveTopParams(slot);
-      const effC = resolveTopCombat(slot);
+      const eff = resolveTopParams(slot, config.ruleset);
+      const effC = resolveTopCombat(slot, config.ruleset);
       const def = getTop(slot.topId);
       const rows = [
         ...TOP_COMBAT_PARAMS.map((s) => {
@@ -189,6 +275,14 @@ export class DevPanel {
     ]);
   }
 
+  private select(label: string, options: { value: string; label: string }[], value: string, set: (v: string) => void): HTMLElement {
+    const sel = el('select', { 'aria-label': label });
+    for (const o of options) sel.append(el('option', { value: o.value, text: o.label }));
+    sel.value = value;
+    sel.addEventListener('change', () => set(sel.value));
+    return el('label', { class: 'dev-select' }, [label, sel]);
+  }
+
   private checkbox(label: string, value: boolean, set: (v: boolean) => void): HTMLElement {
     const cb = el('input', { type: 'checkbox' });
     cb.checked = value;
@@ -248,6 +342,19 @@ export class DevPanel {
     this.messages.className = 'dev-msg ok';
     this.messages.textContent = msg;
   }
+}
+
+/** Sets one probability and rescales the others so the four sum to 1. */
+export function renormalise(d: Record<LaunchQuality, number>, key: LaunchQuality, v: number): void {
+  const val = Math.min(1, Math.max(0, v));
+  const others = LAUNCH_QUALITIES.filter((q) => q !== key);
+  const rest = others.reduce((a, q) => a + d[q], 0);
+  d[key] = val;
+  for (const q of others) d[q] = rest > 0 ? (d[q] / rest) * (1 - val) : (1 - val) / others.length;
+  // Round to 4 dp and put any rounding residue on the edited key.
+  for (const q of LAUNCH_QUALITIES) d[q] = Math.round(d[q] * 10000) / 10000;
+  const sum = LAUNCH_QUALITIES.reduce((a, q) => a + d[q], 0);
+  d[key] = Math.round((d[key] + 1 - sum) * 10000) / 10000;
 }
 
 function fmt(v: number, step: number): string {

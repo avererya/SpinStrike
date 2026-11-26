@@ -120,3 +120,21 @@ export interface TopLaunch {
 export function makeLaunch(quality: LaunchQuality, bonuses: LaunchBonuses, source: TopLaunch['source']): TopLaunch {
   return Object.freeze({ quality, energyMultiplier: bonuses[quality], source });
 }
+
+/**
+ * The player's launch quality from the minigame. `pressedAt` = meter clock
+ * (s) when LAUNCH was pressed, or null if not pressed yet. Returns null while
+ * the player may still launch; 'poor' once `elapsed` reaches `timeout`
+ * without a press.
+ */
+export function playerLaunchQuality(
+  pressedAt: number | null,
+  elapsed: number,
+  sweepTime: number,
+  zones: LaunchZones,
+  timeout: number,
+): LaunchQuality | null {
+  if (pressedAt !== null) return qualityAt(meterPosition(pressedAt, sweepTime), zones);
+  if (elapsed >= timeout) return 'poor';
+  return null;
+}

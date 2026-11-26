@@ -2,15 +2,17 @@ import { Battle } from '../sim/battle';
 import { FixedStepRunner, SIM_SPEEDS } from '../sim/runner';
 import { randomSeed } from '../sim/rng';
 import { getTop, type TopDefinition } from '../content/tops';
-import { buildBattleOptions, cloneConfig, defaultConfig, type SandboxConfig } from '../config/sandboxConfig';
+import { autoLaunches, buildBattleOptions, cloneConfig, defaultConfig, rematchConfig, type SandboxConfig } from '../config/sandboxConfig';
 import { SceneRenderer } from '../render/sceneRenderer';
 import { DEFAULT_DEBUG_FLAGS, type DebugFlags } from '../render/debugDraw';
 import { DevPanel, TOP_OPTIONS } from './devPanel';
 import { Hud } from './hud';
 import { el, hex } from './dom';
-import type { FinishKind } from '../sim/combat';
+import { formatBonus, formatHealth, formatStamina } from './format';
+import { FINISH_LABEL, describeResult } from './resultText';
+import { LAUNCH_QUALITY_LABEL, meterPosition, playerLaunchQuality, type TopLaunch } from '../sim/launch';
+import { BUILD_ID, VERSION_LABEL } from '../version';
 
-const FINISH_LABEL: Record<FinishKind, string> = { burst: 'BURST FINISH', knockout: 'KNOCKOUT FINISH', spin: 'SPIN FINISH' };
 /** Presentation timings (real seconds). Never affect the simulated result. */
 const SLOWMO_FACTOR = 0.3;
 const SLOWMO_TIME = 0.7;
@@ -19,20 +21,34 @@ const RESULT_DELAY_CINEMATIC = 1.6;
 const RESULT_DELAY_PLAIN = 0.4;
 const DAMAGE_NUMBER_POOL = 12;
 const DAMAGE_NUMBER_LIFE = 0.9;
+const CRIT_NUMBER_LIFE = 1.15;
 const DAMAGE_NUMBER_MIN = 1;
+/** Real seconds the launch result is shown before combat starts. */
+const LAUNCH_REVEAL = 0.85;
+/** Real seconds the launch qualities are shown when the minigame is bypassed. */
+const LAUNCH_REVEAL_BYPASS = 0.5;
 
 interface DamageNumber {
   el: HTMLElement;
+  label: HTMLElement;
+  value: HTMLElement;
   x: number;
   y: number;
   life: number;
+  maxLife: number;
 }
 
-type Status = 'ready' | 'running' | 'paused' | 'finished';
+type Status = 'ready' | 'launching' | 'running' | 'paused' | 'finished';
 
 /**
  * Sandbox application: wires the simulation, renderer and DOM UI together.
  * Owns no physics logic itself.
+ *
+ * Battle flow (v0.3): Start → launch minigame (or bypass) → launch result
+ * reveal → autonomous battle → finish presentation → result card.
+ *   - "New battle" / "Again" / Rematch: fresh seed and a fresh launch.
+ *   - "Replay (same seed)": exact replay of the last battle, reusing its
+ *     recorded launch qualities, so the outcome is identical.
  */
 export class SandboxApp {
   private config: SandboxConfig = defaultConfig(randomSeed());
@@ -54,6 +70,13 @@ export class SandboxApp {
   private stepMs = 0;
   private hudTimer = 0;
   private speed = 1;
+  /** Launch of the current battle (null until launched). Reused by exact replays. */
+  private launches: readonly TopLaunch[] | null = null;
+  /** Seed the recorded launches belong to. */
+  private launchSeed = -1;
+  /** Minigame clock (real seconds) and reveal countdown. */
+  private launchClock = 0;
+  private revealClock = -1;
 
   // DOM
   private readonly stage: HTMLElement;
@@ -67,10 +90,19 @@ export class SandboxApp {
   private readonly speedBtns: HTMLButtonElement[] = [];
   private readonly result: HTMLElement;
   private readonly resultText: HTMLElement;
+  private readonly resultBadge: HTMLElement;
   private readonly resultSub: HTMLElement;
   private readonly resultTable: HTMLElement;
+  private readonly resultButtons: HTMLElement;
   private readonly stats: HTMLElement;
   private readonly errorBox: HTMLElement;
+  // Launch minigame
+  private readonly launchBox: HTMLElement;
+  private readonly launchMeter: HTMLElement;
+  private readonly launchNeedle: HTMLElement;
+  private readonly launchBtn: HTMLButtonElement;
+  private readonly launchMsg: HTMLElement;
+  private readonly launchOpp: HTMLElement;
 
   constructor(private readonly root: HTMLElement) {
     this.canvas = el('canvas', { class: 'stage-canvas', 'aria-label': 'Battle stadium' });
@@ -79,8 +111,8 @@ export class SandboxApp {
     this.startBtn = el('button', { class: 'btn primary', text: 'Start', title: 'Start battle (Space)' });
     this.pauseBtn = el('button', { class: 'btn', text: 'Pause' });
     const resetBtn = el('button', { class: 'btn', text: 'Reset', title: 'Reset to launch position (same seed)' });
-    const sameBtn = el('button', { class: 'btn', title: 'Restart immediately with the same seed' }, ['↻', el('span', { class: 'btn-label', text: ' Same seed' })]);
-    const newBtn = el('button', { class: 'btn', title: 'Restart immediately with a new random seed' }, ['⚄', el('span', { class: 'btn-label', text: ' New seed' })]);
+    const sameBtn = el('button', { class: 'btn', title: 'Exact replay: same seed and same launch qualities (R)' }, ['↻', el('span', { class: 'btn-label', text: ' Same seed' })]);
+    const newBtn = el('button', { class: 'btn', title: 'New battle with a new random seed and a fresh launch' }, ['⚄', el('span', { class: 'btn-label', text: ' New seed' })]);
     const devBtn = el('button', { class: 'btn', title: 'Developer panel' }, ['⚙', el('span', { class: 'btn-label', text: ' Dev' })]);
     const speedGroup = el('div', { class: 'seg', role: 'group', 'aria-label': 'Simulation speed' });
     for (const s of SIM_SPEEDS) {
@@ -93,11 +125,8 @@ export class SandboxApp {
     this.startBtn.addEventListener('click', () => this.startBattle());
     this.pauseBtn.addEventListener('click', () => this.togglePause());
     resetBtn.addEventListener('click', () => this.rebuild(false));
-    sameBtn.addEventListener('click', () => this.rebuild(true));
-    newBtn.addEventListener('click', () => {
-      this.config.seed = randomSeed();
-      this.rebuild(true);
-    });
+    sameBtn.addEventListener('click', () => this.replay());
+    newBtn.addEventListener('click', () => this.freshBattle());
     devBtn.addEventListener('click', () => this.dev.toggle());
     this.playerSel.addEventListener('change', () => {
       this.config.player = { topId: this.playerSel.value, overrides: {} };
@@ -109,7 +138,7 @@ export class SandboxApp {
     });
 
     const toolbar = el('header', { class: 'toolbar' }, [
-      el('div', { class: 'brand' }, [el('span', { class: 'logo', text: 'SpinStrike' }), el('span', { class: 'tag', text: 'v0.2 combat sandbox' })]),
+      el('div', { class: 'brand' }, [el('span', { class: 'logo', text: 'SpinStrike' }), el('span', { class: 'tag', text: VERSION_LABEL, title: `Build ${BUILD_ID}` })]),
       el('div', { class: 'tb-group picks' }, [
         el('label', { class: 'pick' }, [el('span', { text: 'Player' }), this.playerSel]),
         el('span', { class: 'vs', text: 'vs' }),
@@ -120,39 +149,62 @@ export class SandboxApp {
     ]);
 
     this.resultText = el('div', { class: 'result-title' });
+    this.resultBadge = el('div', { class: 'result-badge' });
     this.resultSub = el('div', { class: 'result-sub' });
     this.resultTable = el('div', { class: 'result-table' });
-    const rSame = el('button', { class: 'btn primary', text: 'Restart (same seed)' });
-    rSame.addEventListener('click', () => this.rebuild(true));
-    const rNew = el('button', { class: 'btn', text: 'New seed' });
-    rNew.addEventListener('click', () => {
-      this.config.seed = randomSeed();
-      this.rebuild(true);
-    });
-    const rClose = el('button', { class: 'btn', text: 'Close' });
-    rClose.addEventListener('click', () => this.result.classList.remove('show'));
+    this.resultButtons = el('div', { class: 'btn-row' });
     this.result = el('div', { class: 'result', role: 'dialog', 'aria-live': 'polite' }, [
       this.resultText,
+      this.resultBadge,
       this.resultSub,
       this.resultTable,
-      el('div', { class: 'btn-row' }, [rSame, rNew, rClose]),
+      this.resultButtons,
     ]);
     this.banner = el('div', { class: 'finish-banner', 'aria-live': 'assertive' });
     this.dmgLayer = el('div', { class: 'dmg-layer', 'aria-hidden': 'true' });
     for (let i = 0; i < DAMAGE_NUMBER_POOL; i++) {
-      const d = el('div', { class: 'dmg-num' });
+      const label = el('span', { class: 'dmg-label', text: 'CRITICAL HIT' });
+      const value = el('span', { class: 'dmg-value' });
+      const d = el('div', { class: 'dmg-num' }, [label, value]);
       this.dmgLayer.append(d);
-      this.dmgNums.push({ el: d, x: 0, y: 0, life: 0 });
+      this.dmgNums.push({ el: d, label, value, x: 0, y: 0, life: 0, maxLife: DAMAGE_NUMBER_LIFE });
     }
+
+    // Launch minigame overlay.
+    this.launchNeedle = el('div', { class: 'launch-needle' });
+    this.launchMeter = el('div', { class: 'launch-meter', role: 'img', 'aria-label': 'Launch timing meter' }, [
+      el('div', { class: 'zone z-good' }),
+      el('div', { class: 'zone z-great' }),
+      el('div', { class: 'zone z-perfect' }),
+      this.launchNeedle,
+    ]);
+    this.launchBtn = el('button', { class: 'btn primary launch-btn', text: 'LAUNCH', title: 'Launch (Space or tap)' });
+    this.launchBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.pressLaunch();
+    });
+    this.launchBtn.addEventListener('click', (e) => e.preventDefault());
+    this.launchMsg = el('div', { class: 'launch-msg' });
+    this.launchOpp = el('div', { class: 'launch-opp' });
+    this.launchBox = el('div', { class: 'launch-box', 'aria-live': 'polite' }, [
+      el('div', { class: 'launch-title', text: 'Time your launch' }),
+      this.launchMeter,
+      this.launchMsg,
+      this.launchOpp,
+      this.launchBtn,
+      el('div', { class: 'launch-hint', text: 'Stop the marker in the centre · Space or tap' }),
+    ]);
+
     this.stats = el('pre', { class: 'stats' });
     this.errorBox = el('div', { class: 'error-box' });
-    this.stage = el('main', { class: 'stage' }, [this.canvas, this.dmgLayer, this.hud.root, this.banner, this.result, this.stats, this.errorBox]);
+    this.stage = el('main', { class: 'stage' }, [this.canvas, this.dmgLayer, this.hud.root, this.banner, this.launchBox, this.result, this.stats, this.errorBox]);
 
     this.dev = new DevPanel({
       onConfigChange: (c) => {
         this.config = c;
         this.playerSel.value = c.player.topId;
         this.oppSel.value = c.opponent.topId;
+        this.launches = null;
         this.rebuild(false, false);
       },
       onDebugChange: (f) => {
@@ -182,17 +234,24 @@ export class SandboxApp {
       if ((e.target as HTMLElement).closest('input, textarea, select')) return;
       if (e.code === 'Space') {
         e.preventDefault();
-        if (this.status === 'ready') this.startBattle();
+        if (e.repeat) return;
+        if (this.status === 'launching') this.pressLaunch();
+        else if (this.status === 'ready' || this.status === 'finished') this.startBattle();
         else this.togglePause();
-      } else if (e.key === 'r') this.rebuild(true);
+      } else if (e.key === 'r') this.replay();
     });
     this.lastTime = performance.now();
     requestAnimationFrame(this.frame);
   }
 
-  /** Rebuilds the battle from the current config. */
-  rebuild(startNow: boolean, rerenderDev = true): void {
-    this.battle = new Battle(buildBattleOptions(this.config));
+  /**
+   * Rebuilds the battle from the current config. `launches` = launch record
+   * to use (exact replay / just launched); without it the tops are placed at
+   * their launch positions waiting for a launch.
+   */
+  rebuild(startNow: boolean, rerenderDev = true, launches?: readonly TopLaunch[]): void {
+    const ls = launches ?? autoLaunches(this.config);
+    this.battle = new Battle(buildBattleOptions(this.config, ls));
     this.runner = new FixedStepRunner(this.battle);
     this.runner.speed = this.speed;
     this.runner.paused = !startNow;
@@ -200,10 +259,12 @@ export class SandboxApp {
     this.renderer.setWorld(this.battle.world, defs);
     const mirror = defs[0]!.id === defs[1]!.id;
     this.hud.setTops(defs, this.config.seed, mirror ? ['P1', 'P2'] : ['Player', 'Opponent']);
+    this.hud.setLaunches(launches ?? null);
     this.hud.update(this.battle);
     this.status = startNow ? 'running' : 'ready';
     this.resultShown = false;
     this.result.classList.remove('show');
+    this.hideLaunch();
     this.finishClock = -1;
     this.bannerShown = false;
     this.banner.className = 'finish-banner';
@@ -218,17 +279,132 @@ export class SandboxApp {
   }
 
   private onConfigEdited(): void {
+    this.launches = null;
     this.rebuild(false);
   }
 
+  /** Start / Again: launch the prepared battle (fresh launch). */
   private startBattle(): void {
     if (this.status === 'finished') {
-      this.rebuild(true);
+      this.freshBattle();
       return;
     }
-    this.runner.paused = false;
-    this.status = 'running';
+    if (this.status !== 'ready') return;
+    this.beginLaunch();
+  }
+
+  /** New seed + fresh launch (New seed button, Again, Rematch). */
+  private freshBattle(): void {
+    this.config = rematchConfig(this.config, randomSeed());
+    this.launches = null;
+    this.rebuild(false);
+    this.beginLaunch();
+  }
+
+  /**
+   * Exact replay: same seed and the recorded launch qualities, so both the
+   * launch parameters and the simulated outcome are reproduced. Without a
+   * recorded launch for this seed it falls back to the automatic launch.
+   */
+  private replay(): void {
+    const ls = this.launches && this.launchSeed === this.config.seed ? this.launches : null;
+    if (!ls && this.needsMinigame()) {
+      this.rebuild(false);
+      this.beginLaunch();
+      return;
+    }
+    this.rebuild(true, true, ls ?? autoLaunches(this.config));
+    this.recordLaunch(this.battle.launches);
+  }
+
+  private needsMinigame(): boolean {
+    return this.config.launch.minigame && this.config.launch.playerQuality === 'auto';
+  }
+
+  private beginLaunch(): void {
+    if (!this.needsMinigame()) {
+      // Bypass: qualities come from the fixed settings / seeded distribution.
+      this.launchWith(autoLaunches(this.config), LAUNCH_REVEAL_BYPASS);
+      return;
+    }
+    this.status = 'launching';
+    this.launchClock = 0;
+    this.revealClock = -1;
+    const z = this.config.launch.zones;
+    const zone = (cls: string, half: number) => {
+      const e = this.launchMeter.querySelector<HTMLElement>(`.${cls}`)!;
+      e.style.left = `${(0.5 - half) * 100}%`;
+      e.style.width = `${2 * half * 100}%`;
+    };
+    zone('z-good', z.good);
+    zone('z-great', z.great);
+    zone('z-perfect', z.perfect);
+    this.launchMsg.textContent = '';
+    this.launchMsg.className = 'launch-msg';
+    this.launchOpp.textContent = '';
+    this.launchBtn.disabled = false;
+    this.launchBox.classList.remove('revealing', 'bypass');
+    this.launchBox.classList.add('show');
     this.updateButtons();
+  }
+
+  /** The player pressed LAUNCH (button, tap or Space). */
+  private pressLaunch(): void {
+    if (this.status !== 'launching' || this.revealClock >= 0) return;
+    const L = this.config.launch;
+    this.launchNeedle.style.left = `${meterPosition(this.launchClock, L.sweepTime) * 100}%`;
+    const q = playerLaunchQuality(this.launchClock, this.launchClock, L.sweepTime, L.zones, L.timeout)!;
+    this.launchWith(autoLaunches(this.config, q), LAUNCH_REVEAL);
+  }
+
+  /** Builds the battle with the decided launches and shows the reveal. */
+  private launchWith(ls: readonly TopLaunch[], reveal: number): void {
+    this.rebuild(false, false, ls);
+    this.recordLaunch(ls);
+    this.status = 'launching';
+    this.revealClock = reveal;
+    const [p, o] = ls;
+    const name = (i: number) => getTop(i === 0 ? this.config.player.topId : this.config.opponent.topId).name;
+    this.launchMsg.textContent = `${LAUNCH_QUALITY_LABEL[p!.quality]}! ${formatBonus(p!.energyMultiplier)} spin energy`;
+    this.launchMsg.className = `launch-msg q-${p!.quality}`;
+    this.launchOpp.textContent = `${name(1)}: ${LAUNCH_QUALITY_LABEL[o!.quality]} launch · ${formatBonus(o!.energyMultiplier)}`;
+    this.launchBtn.disabled = true;
+    this.launchBox.classList.add('show', 'revealing');
+    this.launchBox.classList.toggle('bypass', reveal === LAUNCH_REVEAL_BYPASS);
+    this.updateButtons();
+  }
+
+  private recordLaunch(ls: readonly TopLaunch[]): void {
+    this.launches = ls;
+    this.launchSeed = this.config.seed;
+    this.hud.setLaunches(ls);
+  }
+
+  private hideLaunch(): void {
+    this.revealClock = -1;
+    this.launchBox.classList.remove('show', 'revealing', 'bypass');
+  }
+
+  private updateLaunch(dt: number): void {
+    if (this.status !== 'launching') return;
+    if (this.revealClock >= 0) {
+      this.revealClock -= dt;
+      if (this.revealClock < 0) {
+        this.hideLaunch();
+        this.runner.paused = false;
+        this.status = 'running';
+        this.updateButtons();
+      }
+      return;
+    }
+    this.launchClock += dt;
+    this.launchNeedle.style.left = `${meterPosition(this.launchClock, this.config.launch.sweepTime) * 100}%`;
+    const L = this.config.launch;
+    if (playerLaunchQuality(null, this.launchClock, L.sweepTime, L.zones, L.timeout) === 'poor') {
+      // No launch in time: a Poor launch (configurable timeout).
+      this.launchWith(autoLaunches(this.config, 'poor'), LAUNCH_REVEAL);
+      this.launchMsg.textContent = `Too slow: Poor launch · ${formatBonus(this.config.launch.bonuses.poor)}`;
+    }
   }
 
   private togglePause(): void {
@@ -249,7 +425,7 @@ export class SandboxApp {
   }
 
   private updateButtons(): void {
-    this.startBtn.disabled = this.status === 'running' || this.status === 'paused';
+    this.startBtn.disabled = this.status === 'running' || this.status === 'paused' || this.status === 'launching';
     this.startBtn.textContent = this.status === 'finished' ? 'Again' : 'Start';
     this.pauseBtn.disabled = !(this.status === 'running' || this.status === 'paused');
     this.pauseBtn.textContent = this.status === 'paused' ? 'Resume' : 'Pause';
@@ -269,6 +445,7 @@ export class SandboxApp {
     const dt = Math.min(0.25, Math.max(0, (now - this.lastTime) / 1000));
     this.lastTime = now;
     if (dt > 0) this.fps += (1 / dt - this.fps) * 0.08;
+    this.updateLaunch(dt);
 
     // Finishing presentation: brief slow motion right after the decisive
     // moment. Only the playback rate of the post-result aftermath changes;
@@ -287,14 +464,19 @@ export class SandboxApp {
     if (events.length) this.renderer.onCollisions(events, this.flags.contacts);
     const dmg = this.battle.world.drainDamage();
     if (dmg.length) {
-      this.renderer.onDamage(dmg);
-      if (this.config.presentation.damageNumbers) {
-        for (const ev of dmg) {
-          const bA = this.battle.world.bodies[ev.a]!;
-          const bB = this.battle.world.bodies[ev.b]!;
-          if (ev.damageToB >= DAMAGE_NUMBER_MIN) this.spawnDamageNumber(bB.x, bB.y, ev.damageToB, ev.b);
-          if (ev.damageToA >= DAMAGE_NUMBER_MIN) this.spawnDamageNumber(bA.x, bA.y, ev.damageToA, ev.a);
-        }
+      const p = this.config.presentation;
+      this.renderer.onDamage(dmg, p.criticalEffects);
+      for (const ev of dmg) {
+        const bA = this.battle.world.bodies[ev.a]!;
+        const bB = this.battle.world.bodies[ev.b]!;
+        // Critical numbers appear by default even when ordinary numbers are off.
+        const showB = ev.damageToB >= DAMAGE_NUMBER_MIN && (p.damageNumbers || (ev.critToB && p.criticalEffects));
+        const showA = ev.damageToA >= DAMAGE_NUMBER_MIN && (p.damageNumbers || (ev.critToA && p.criticalEffects));
+        // Critical numbers sit at the impact point (offset toward the target) so they read as part of the hit.
+        const critB = ev.critToB && p.criticalEffects;
+        const critA = ev.critToA && p.criticalEffects;
+        if (showB) this.spawnDamageNumber(critB ? ev.x + ev.nx * 0.012 : bB.x, critB ? ev.y + ev.ny * 0.012 : bB.y, ev.damageToB, ev.b, critB);
+        if (showA) this.spawnDamageNumber(critA ? ev.x - ev.nx * 0.012 : bA.x, critA ? ev.y - ev.ny * 0.012 : bA.y, ev.damageToA, ev.a, critA);
       }
     }
     if (this.battle.phase === 'finished' && this.finishClock < 0) this.finishClock = 0;
@@ -316,15 +498,17 @@ export class SandboxApp {
     requestAnimationFrame(this.frame);
   };
 
-  private spawnDamageNumber(x: number, y: number, dmg: number, target: number): void {
+  private spawnDamageNumber(x: number, y: number, dmg: number, target: number, crit: boolean): void {
     const d = this.dmgNums[this.dmgNext]!;
     this.dmgNext = (this.dmgNext + 1) % this.dmgNums.length;
     d.x = x;
     d.y = y;
-    d.life = DAMAGE_NUMBER_LIFE;
+    d.maxLife = crit ? CRIT_NUMBER_LIFE : DAMAGE_NUMBER_LIFE;
+    d.life = d.maxLife;
     const max = this.battle.world.bodies[target]!.combat.maxHealth;
-    d.el.textContent = `-${Math.round(dmg)}`;
-    d.el.classList.toggle('heavy', dmg / max >= 0.06);
+    d.value.textContent = `-${Math.round(dmg)}`;
+    d.el.classList.toggle('heavy', !crit && dmg / max >= 0.06);
+    d.el.classList.toggle('crit', crit);
     d.el.classList.add('show');
   }
 
@@ -338,11 +522,12 @@ export class SandboxApp {
       }
       const p = this.renderer.project(d.x, d.y, 0.04);
       if (!p) continue;
-      const t = 1 - d.life / DAMAGE_NUMBER_LIFE;
+      const t = 1 - d.life / d.maxLife;
       // The overlay covers the stage; the canvas may be offset inside it (mobile HUD above).
       const ox = this.canvas.offsetLeft;
       const oy = this.canvas.offsetTop;
-      d.el.style.transform = `translate(${(p.x + ox).toFixed(1)}px, ${(p.y + oy - 18 - t * 34).toFixed(1)}px) translate(-50%, -50%)`;
+      const pop = d.el.classList.contains('crit') ? 1 + 0.35 * Math.max(0, 1 - t * 5) : 1;
+      d.el.style.transform = `translate(${(p.x + ox).toFixed(1)}px, ${(p.y + oy - 18 - t * 34).toFixed(1)}px) translate(-50%, -50%) scale(${pop.toFixed(3)})`;
       d.el.style.opacity = String(Math.min(1, d.life / 0.3));
     }
   }
@@ -353,7 +538,7 @@ export class SandboxApp {
     let text: string;
     let kind: string;
     if (o.kind === 'win') {
-      text = FINISH_LABEL[o.finish];
+      text = o.narrow ? 'NARROW VICTORY' : FINISH_LABEL[o.finish];
       kind = o.finish;
     } else if (o.kind === 'draw') {
       text = 'DRAW';
@@ -393,39 +578,49 @@ export class SandboxApp {
     const defs = [getTop(this.config.player.topId), getTop(this.config.opponent.topId)];
     const mirror = defs[0]!.id === defs[1]!.id;
     const label = (i: number) => (mirror ? `${defs[i]!.name} (${i === 0 ? 'P1' : 'P2'})` : defs[i]!.name);
-    const o = r.outcome;
-    const finishText: Record<FinishKind, (l: string) => string> = {
-      burst: (l) => `${l} burst apart`,
-      knockout: (l) => `${l} was knocked out of the stadium`,
-      spin: (l) => `${l} stopped spinning`,
-    };
-    if (o.kind === 'win') {
-      this.resultText.textContent = `${label(o.winner)} wins!`;
-      this.resultText.style.color = hex(defs[o.winner]!.palette.accent);
-      this.resultSub.textContent = `${FINISH_LABEL[o.finish]} · ${finishText[o.finish](label(o.loser))} · ${r.time.toFixed(1)} s`;
-    } else if (o.kind === 'draw') {
-      this.resultText.textContent = 'Draw';
-      this.resultText.style.color = '';
-      this.resultSub.textContent = `Both tops were eliminated on the same physics step (${o.finishes.map((f) => FINISH_LABEL[f].toLowerCase()).join(' + ')}) · ${r.time.toFixed(1)} s`;
-    } else {
-      this.resultText.textContent = 'Time up';
-      this.resultText.style.color = '';
-      this.resultSub.textContent = `Both tops still in play after ${r.time.toFixed(0)} s (maximum duration). No winner.`;
-    }
+    const content = describeResult(r, label);
+    this.resultText.textContent = content.title;
+    this.resultText.style.color = r.outcome.kind === 'win' ? hex(defs[r.outcome.winner]!.palette.accent) : '';
+    this.resultBadge.textContent = content.badge;
+    this.resultBadge.classList.toggle('show', content.badge !== '');
+    this.resultSub.textContent = content.sub;
     const row = (k: string, f: (i: number) => string) =>
       [el('span', { class: 'rk', text: k }), el('span', { text: f(0) }), el('span', { text: f(1) })];
     const head = [el('span'), ...[0, 1].map((i) => el('span', { class: 'rh', text: label(i), style: `color:${hex(defs[i]!.palette.accent)}` }))];
-    const strongest = r.strongestHit.by >= 0 ? `${r.strongestHit.damage.toFixed(0)} by ${label(r.strongestHit.by)}` : 'none';
+    const s = r.strongestHit;
+    const strongest = s.by >= 0 ? `${s.damage.toFixed(0)} by ${label(s.by)}${s.critical ? ' (critical hit)' : ''}` : 'none';
     this.resultTable.replaceChildren(
       el('div', { class: 'rgrid' }, [
         ...head,
-        ...row('Health left', (i) => `${Math.ceil(r.tops[i]!.health)} / ${Math.round(r.tops[i]!.maxHealth)}`),
-        ...row('Stamina left', (i) => `${(r.tops[i]!.stamina * 100).toFixed(0)}%`),
+        ...row('Launch', (i) => `${LAUNCH_QUALITY_LABEL[r.launches[i]!.quality]} ${formatBonus(r.launches[i]!.energyMultiplier)}`),
+        ...row('Health left', (i) => formatHealth(r.tops[i]!.health, r.tops[i]!.maxHealth)),
+        ...row('Stamina left', (i) => formatStamina(r.tops[i]!.stamina)),
         ...row('Damage dealt', (i) => r.tops[i]!.damageDealt.toFixed(0)),
-        ...row('Hits landed', (i) => String(r.tops[i]!.hitsLanded)),
+        ...row('Hits (crits)', (i) => `${r.tops[i]!.hitsLanded} (${r.tops[i]!.critsLanded})`),
       ]),
-      el('div', { class: 'rmeta' }, [`Strongest hit: ${strongest}`, el('br'), `Duration ${r.time.toFixed(1)} s · seed ${r.seed}`]),
+      el('details', { class: 'rmore' }, [
+        el('summary', { text: 'More statistics' }),
+        el('div', { class: 'rgrid' }, [
+          ...head.map((h) => h.cloneNode(true)),
+          ...row('Crit damage dealt', (i) => r.tops[i]!.critDamageDealt.toFixed(0)),
+          ...row('Crits received', (i) => String(r.tops[i]!.critsReceived)),
+          ...row('Damage taken', (i) => r.tops[i]!.damageReceived.toFixed(0)),
+          ...row('Strongest hit', (i) => `${r.tops[i]!.strongestHit.toFixed(0)}${r.tops[i]!.strongestHitCritical ? ' crit' : ''}`),
+          ...row('Collisions', (i) => String(r.tops[i]!.collisions)),
+        ]),
+      ]),
+      el('div', { class: 'rmeta' }, [`Strongest hit: ${strongest}`, el('br'), `Duration ${r.time.toFixed(2)} s · seed ${r.seed}`]),
     );
+    const btn = (text: string, cls: string, fn: () => void, title = '') => {
+      const b = el('button', { class: `btn ${cls}`, text, title });
+      b.addEventListener('click', fn);
+      return b;
+    };
+    const close = btn('Close', '', () => this.result.classList.remove('show'));
+    const replay = btn('Replay (same seed)', '', () => this.replay(), 'Exact replay: same seed and launch');
+    const fresh = btn(r.outcome.kind === 'draw' ? 'Rematch' : 'New battle', 'primary', () => this.freshBattle(), 'Same tops, new seed, fresh launch');
+    if (r.outcome.kind === 'draw') fresh.classList.add('rematch');
+    this.resultButtons.replaceChildren(fresh, replay, close);
     this.result.classList.add('show');
   }
 
@@ -435,8 +630,24 @@ export class SandboxApp {
     return s;
   }
 
+  /** Shows a small, dismissible "new version available" notice (no automatic reload). */
+  showUpdateNotice(version: string, build: string): void {
+    if (this.root.querySelector('.update-notice')) return;
+    const reload = el('button', { class: 'btn small primary', text: 'Reload' });
+    reload.addEventListener('click', () => location.reload());
+    const dismiss = el('button', { class: 'btn small', text: 'Later' });
+    const box = el('div', { class: 'update-notice', role: 'status' }, [
+      el('span', { text: `A newer version is available (v${version} · ${build}).` }),
+      reload,
+      dismiss,
+    ]);
+    dismiss.addEventListener('click', () => box.remove());
+    this.stage.append(box);
+  }
+
   /** For console debugging: a snapshot of the active configuration. */
   get currentConfig(): SandboxConfig {
     return cloneConfig(this.config);
   }
 }
+
