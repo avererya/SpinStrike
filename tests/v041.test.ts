@@ -20,6 +20,7 @@ import { CareerStore, MemoryStore } from '../src/career/store';
 import { loadSaveData } from '../src/career/save';
 import { playHeadlessBattle } from '../src/career/headless';
 import { buildCareerConfig, createBattleSetup } from '../src/career/battle';
+import { COMBAT_RULESET } from '../src/sim/tactics';
 
 const DIAG_SEED = 3782078522;
 
@@ -286,7 +287,7 @@ describe('v0.4.0 save compatibility', () => {
     const { settled } = playHeadlessBattle(store, 'normal', 99);
     expect(settled.duplicate ?? false).toBe(false);
     const rec = store.activeTop!.stats.recent.at(-1)!;
-    expect(rec.ruleset).toBe(PHYSICS_VERSION);
+    expect(rec.ruleset).toBe(COMBAT_RULESET); // v0.5: battles with abilities record the v0.5.0 ruleset
     expect(rec.aim).toEqual({ direction: 18, tilt: 6 });
     expect(isAim(rec.opponentAim)).toBe(true);
     // Persisted and reloaded.

@@ -11,6 +11,11 @@ import { buildTopModel, disposeMaterialCache, type TopModel } from './topModels'
 import { ImpactRings, Sparks, Trail } from './effects';
 import { DebugDraw, type DebugFlags } from './debugDraw';
 import type { StadiumSurface } from '../sim/stadium/types';
+import type { TacticalEvent } from '../sim/tactics';
+import { braceActive } from '../sim/tactics';
+
+const BRACE_COLOR = 0x4aa8ff;
+const BOOST_COLOR = 0xffe08a;
 
 const S = WORLD_SCALE;
 /** Camera elevation above the horizon, radians (fixed, angled overhead). */
@@ -45,6 +50,12 @@ export class SceneRenderer {
   /** Flash and camera shake on finishes (developer toggle). */
   cinematic = true;
   private readonly camBase = new THREE.Vector3();
+  /** v0.5 Brace shield per top (cosmetic) and its impact pulse. */
+  private shields: THREE.Mesh[] = [];
+  private shieldPulse: number[] = [];
+  private shieldFade: number[] = [];
+  private readonly shieldGeo = new THREE.TorusGeometry(1, 0.09, 8, 40);
+  private shieldTime = 0;
   private readonly projV = new THREE.Vector3();
 
   constructor(canvas: HTMLCanvasElement) {
@@ -114,6 +125,22 @@ export class SceneRenderer {
     for (const m of this.models) this.scene.add(m.root);
     for (const t of this.trails) this.scene.add(t.mesh);
     this.finishStarted = defs.map(() => false);
+    for (const sh of this.shields) {
+      this.scene.remove(sh);
+      (sh.material as THREE.Material).dispose();
+    }
+    this.shields = defs.map(() => {
+      const m = new THREE.Mesh(
+        this.shieldGeo,
+        new THREE.MeshBasicMaterial({ color: BRACE_COLOR, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }),
+      );
+      m.rotation.x = -Math.PI / 2;
+      m.visible = false;
+      this.scene.add(m);
+      return m;
+    });
+    this.shieldPulse = defs.map(() => 0);
+    this.shieldFade = defs.map(() => 0);
     this.sparks.clear();
     this.rings.clear();
     this.debug.setWorld(world, defs.map((d) => d.palette.accent));
@@ -163,6 +190,76 @@ export class SceneRenderer {
       this.sparks.emit(ev.x * S, y, -ev.y * S, ev.nx, -ev.ny, intensity);
       this.rings.emit(ev.x * S, y - 0.1, -ev.y * S, 0.4 + 0.6 * intensity);
     }
+  }
+
+  /**
+   * v0.5 tactical feedback (cosmetic only): a boost streak of sparks behind
+   * the top and a ring at the push-off point; a blue flash when Brace starts,
+   * a pulse when it absorbs a hit, and a fading ring when it expires.
+   */
+  onTactical(events: TacticalEvent[]): void {
+    const w = this.world;
+    if (!w) return;
+    for (const ev of events) {
+      const y = (w.stadium.height(ev.x, ev.y) + 0.018) * S;
+      if (ev.kind === 'boost') {
+        const k = 0.5 + 0.5 * ev.strength;
+        this.sparks.emit(ev.x * S, y, -ev.y * S, -ev.dirY, -ev.dirX, k);
+        this.sparks.emit(ev.x * S, y, -ev.y * S, ev.dirY, ev.dirX, 0.5 * k);
+        this.rings.emit(ev.x * S, y - 0.1, -ev.y * S, 0.35 + 0.4 * ev.strength, BOOST_COLOR);
+      } else if (ev.kind === 'brace-start') {
+        this.rings.emit(ev.x * S, y - 0.1, -ev.y * S, 0.7, BRACE_COLOR);
+        if (this.shieldPulse[ev.slot] !== undefined) this.shieldPulse[ev.slot] = 1;
+      } else if (ev.kind === 'brace-impact') {
+        this.rings.emit(ev.x * S, y - 0.1, -ev.y * S, 0.9, BRACE_COLOR);
+        if (this.shieldPulse[ev.slot] !== undefined) this.shieldPulse[ev.slot] = 1;
+      } else if (ev.kind === 'brace-end') {
+        if (this.shieldFade[ev.slot] !== undefined) this.shieldFade[ev.slot] = 0.35;
+      }
+    }
+  }
+
+  /** Displayed stadium diameter in CSS pixels (gesture normalisation). */
+  stadiumScreenDiameter(): number {
+    const w = this.world;
+    if (!w) return 0;
+    const R = w.stadium.boundingRadius;
+    const a = this.project(-R, 0, 0);
+    const b = this.project(R, 0, 0);
+    return a && b ? Math.hypot(b.x - a.x, b.y - a.y) : 0;
+  }
+
+  /**
+   * Converts a screen-space drag (CSS px) at the sim-plane point (x, y) into
+   * a sim-plane direction, by inverting the local projection Jacobian (the
+   * camera is angled, so screen and floor directions differ).
+   */
+  screenToWorldDir(x: number, y: number, sx: number, sy: number): { x: number; y: number } | null {
+    const e = 0.01;
+    const p0 = this.project(x, y, 0.03);
+    const px = this.project(x + e, y, 0.03);
+    const py = this.project(x, y + e, 0.03);
+    if (!p0 || !px || !py) return null;
+    const a = (px.x - p0.x) / e;
+    const c = (px.y - p0.y) / e;
+    const b = (py.x - p0.x) / e;
+    const d = (py.y - p0.y) / e;
+    const det = a * d - b * c;
+    if (Math.abs(det) < 1e-9) return null;
+    const wx = (d * sx - b * sy) / det;
+    const wy = (-c * sx + a * sy) / det;
+    const l = Math.hypot(wx, wy);
+    return l > 1e-12 ? { x: wx / l, y: wy / l } : null;
+  }
+
+  /** Converts a sim-plane direction at (x, y) to a unit screen direction. */
+  worldToScreenDir(x: number, y: number, dx: number, dy: number): { x: number; y: number } | null {
+    const e = 0.01;
+    const p0 = this.project(x, y, 0.03);
+    const p1 = this.project(x + dx * e, y + dy * e, 0.03);
+    if (!p0 || !p1) return null;
+    const l = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+    return l > 1e-9 ? { x: (p1.x - p0.x) / l, y: (p1.y - p0.y) / l } : null;
   }
 
   /** Projects a simulation-plane point (metres) to canvas CSS pixels, or null if behind the camera. */
@@ -237,6 +334,10 @@ export class SceneRenderer {
         } else m.tilt.quaternion.identity();
         m.spin.rotation.y = b.prevAngle + (b.angle - b.prevAngle) * alpha;
         this.trails[i]?.push(x * S, h * S + 0.03, -y * S);
+        this.updateShield(i, x, y, h, dt);
+      });
+      w.bodies.forEach((b, i) => {
+        if (b.eliminated !== null && this.shields[i]) this.shields[i]!.visible = false;
       });
       this.debug.update(w, alpha, flags, dt);
       this.debug.setSlopeVisible(w, flags.slope);
@@ -253,6 +354,29 @@ export class SceneRenderer {
     );
     this.camera.position.copy(this.camBase).add(this.fx.shake);
     this.renderer.render(this.scene, this.camera);
+  }
+
+  private updateShield(i: number, x: number, y: number, h: number, dt: number): void {
+    const w = this.world!;
+    const sh = this.shields[i];
+    if (!sh) return;
+    this.shieldTime += dt / Math.max(1, this.shields.length);
+    const st = w.abilities[i];
+    const on = !!st && w.tactics.enabled && braceActive(st, w.steps);
+    const mat = sh.material as THREE.MeshBasicMaterial;
+    this.shieldPulse[i] = Math.max(0, (this.shieldPulse[i] ?? 0) - dt * 3);
+    this.shieldFade[i] = Math.max(0, (this.shieldFade[i] ?? 0) - dt);
+    const fade = this.shieldFade[i]!;
+    if (!on && fade <= 0) {
+      sh.visible = false;
+      return;
+    }
+    const r = w.bodies[i]!.params.radius * S;
+    const pulse = this.shieldPulse[i]!;
+    sh.visible = true;
+    sh.position.set(x * S, h * S + 0.06, -y * S);
+    sh.scale.setScalar(r * (1.35 + 0.25 * pulse + (on ? 0.04 * Math.sin(this.shieldTime * 9) : 0.3 * (1 - fade / 0.35))));
+    mat.opacity = on ? 0.55 + 0.4 * pulse : 0.6 * (fade / 0.35);
   }
 
   resetTrails(): void {

@@ -135,7 +135,7 @@ describe('v0.2/v0.3 configuration', () => {
 
   it('rejects unknown versions', () => {
     const c = defaultConfig(1) as unknown as Record<string, any>;
-    c.version = 5;
+    c.version = 6;
     expect(validateConfig(c).ok).toBe(false);
     c.version = 0;
     expect(validateConfig(c).ok).toBe(false);

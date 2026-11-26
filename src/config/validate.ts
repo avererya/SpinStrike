@@ -9,6 +9,8 @@ import {
   LAUNCH_PARAMS,
   LAUNCH_ZONE_PARAMS,
   MOVEMENT_PARAMS,
+  BOOST_PARAMS,
+  BRACE_PARAMS,
   RESULT_PARAMS,
   SIM_LIMITS,
   STADIUM_PARAMS,
@@ -22,6 +24,11 @@ import {
   defaultConfig,
   legacyMovementConfig,
   legacyV02Config,
+  passiveTacticalConfig,
+  isDifficulty,
+  TACTICAL_CONTROLLERS,
+  type TacticalConfig,
+  type TacticalController,
   type FixedQuality,
   type LaunchConfig,
   type PresentationConfig,
@@ -218,6 +225,62 @@ function checkLaunch(errors: string[], raw: unknown, d: LaunchConfig, v3: boolea
   };
 }
 
+function checkTactical(errors: string[], raw: unknown): TacticalConfig {
+  const d = passiveTacticalConfig();
+  if (!isObj(raw)) {
+    errors.push('tactical must be an object');
+    return d;
+  }
+  const notes: string[] = [];
+  const none = new Set<string>();
+  const boost = checkGroup(errors, notes, 'tactical.boost', raw.boost, BOOST_PARAMS, d.boost as unknown as Record<string, number>, none);
+  const brace = checkGroup(errors, notes, 'tactical.brace', raw.brace, BRACE_PARAMS, d.brace as unknown as Record<string, number>, none);
+  if (boost && boost.minStrength !== undefined && boost.maxStrength !== undefined && boost.minStrength > boost.maxStrength) errors.push('tactical.boost.minStrength must not exceed maxStrength');
+  for (const k of ['charges']) {
+    if (boost && boost[k] !== undefined && !Number.isInteger(boost[k])) errors.push(`tactical.boost.${k} must be a whole number`);
+    if (brace && brace[k] !== undefined && !Number.isInteger(brace[k])) errors.push(`tactical.brace.${k} must be a whole number`);
+  }
+  const slot = (path: string, v: unknown) => {
+    if (!isObj(v)) {
+      errors.push(`${path} must be an object {controller, difficulty}`);
+      return { controller: 'passive' as TacticalController, difficulty: 'normal' as const };
+    }
+    const c = v.controller;
+    if (!(TACTICAL_CONTROLLERS as readonly unknown[]).includes(c)) errors.push(`${path}.controller must be one of: ${TACTICAL_CONTROLLERS.join(', ')}`);
+    if (!isDifficulty(v.difficulty)) errors.push(`${path}.difficulty must be easy, normal, hard or expert`);
+    for (const k of Object.keys(v)) if (k !== 'controller' && k !== 'difficulty') errors.push(`${path}.${k} is not a recognised parameter`);
+    return { controller: (TACTICAL_CONTROLLERS as readonly unknown[]).includes(c) ? (c as TacticalController) : 'passive', difficulty: isDifficulty(v.difficulty) ? v.difficulty : 'normal' };
+  };
+  const script: TacticalConfig['script'] = [];
+  if (raw.script !== undefined) {
+    if (!Array.isArray(raw.script)) errors.push('tactical.script must be an array of commands');
+    else if (raw.script.length > 1000) errors.push('tactical.script may contain at most 1000 commands');
+    else
+      raw.script.forEach((c, i) => {
+        const p = `tactical.script[${i}]`;
+        if (!isObj(c)) return errors.push(`${p} must be an object`);
+        if (!Number.isInteger(c.tick) || (c.tick as number) < 0) return errors.push(`${p}.tick must be a non-negative integer`);
+        if (c.slot !== 0 && c.slot !== 1) return errors.push(`${p}.slot must be 0 or 1`);
+        if (c.ability === 'brace') return script.push({ tick: c.tick as number, slot: c.slot, ability: 'brace' });
+        if (c.ability !== 'boost') return errors.push(`${p}.ability must be boost or brace`);
+        const n = (k: string, lo: number, hi: number) => checkNumber(errors, `${p}.${k}`, c[k], lo, hi);
+        const dx = n('dirX', -1e3, 1e3);
+        const dy = n('dirY', -1e3, 1e3);
+        const st = n('strength', 0, 1);
+        if (dx !== undefined && dy !== undefined && st !== undefined) script.push({ tick: c.tick as number, slot: c.slot, ability: 'boost', dirX: dx, dirY: dy, strength: st });
+      });
+  }
+  for (const k of Object.keys(raw)) if (!['enabled', 'boost', 'brace', 'player', 'opponent', 'script'].includes(k)) errors.push(`tactical.${k} is not a recognised parameter`);
+  return {
+    enabled: checkBool(errors, null, 'tactical.enabled', raw.enabled, false, false),
+    boost: (boost as unknown as TacticalConfig['boost']) ?? d.boost,
+    brace: (brace as unknown as TacticalConfig['brace']) ?? d.brace,
+    player: slot('tactical.player', raw.player),
+    opponent: slot('tactical.opponent', raw.opponent),
+    script,
+  };
+}
+
 /**
  * Validates untrusted JSON (e.g. an imported file) into a SandboxConfig.
  *
@@ -236,11 +299,15 @@ export function validateConfig(raw: unknown): ValidationResult {
   const notes: string[] = [];
   if (!isObj(raw)) return { ok: false, errors: ['Configuration must be a JSON object'] };
   const version = raw.version;
-  if (version !== 1 && version !== 2 && version !== 3 && version !== CONFIG_VERSION) {
-    return { ok: false, errors: [`version must be 1 (v0.1), 2 (v0.2), 3 (v0.3 – v0.4.0) or ${CONFIG_VERSION} (v0.4.1) (got ${JSON.stringify(version)})`] };
+  if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== CONFIG_VERSION) {
+    return { ok: false, errors: [`version must be 1 (v0.1), 2 (v0.2), 3 (v0.3 – v0.4.0), 4 (v0.4.1) or ${CONFIG_VERSION} (v0.5) (got ${JSON.stringify(version)})`] };
   }
   const v1 = version === 1;
   const v3 = version === 3;
+  const pre5 = version !== CONFIG_VERSION;
+  if (version === 4) {
+    notes.push('Migrated a version 4 (v0.4.1) configuration: every value is kept and tactical abilities (Boost, Brace) are off, so it reproduces its original battles. Turn them on in the developer panel (Tactical abilities).');
+  }
   if (v3) {
     notes.push(
       'Migrated a version 3 (v0.3 – v0.4.0) configuration: every value is kept, and the v0.4.1 movement variability (launch variation, aiming, floor relief, contact wander) is off so it reproduces its original battles. Turn on natural variation and choose the v0.4.1 ruleset in the developer panel to play it under v0.4.1 rules.',
@@ -320,7 +387,10 @@ export function validateConfig(raw: unknown): ValidationResult {
 
   const player = checkSlot(errors, 'player', raw.player);
   const opponent = checkSlot(errors, 'opponent', raw.opponent);
-  const known = ['version', 'ruleset', 'seed', 'maxDuration', 'stadium', 'collision', 'combat', 'launch', 'movement', 'results', 'presentation', 'player', 'opponent'];
+  let tactical = passiveTacticalConfig();
+  if (!pre5) tactical = checkTactical(errors, raw.tactical);
+  else if (raw.tactical !== undefined) errors.push(`tactical is not valid in a version ${version as number} file`);
+  const known = ['version', 'ruleset', 'seed', 'maxDuration', 'stadium', 'collision', 'combat', 'launch', 'movement', 'results', 'presentation', 'player', 'opponent', 'tactical'];
   for (const k of Object.keys(raw)) if (!known.includes(k)) errors.push(`${k} is not a recognised setting`);
   if (legacy) for (const k of ['ruleset', 'launch', 'results']) if (raw[k] !== undefined) errors.push(`${k} is not valid in a version ${version as number} file`);
 
@@ -344,6 +414,7 @@ export function validateConfig(raw: unknown): ValidationResult {
       presentation,
       player,
       opponent,
+      tactical,
     },
   };
 }

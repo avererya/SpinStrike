@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Battle } from '../src/sim/battle';
 import { runBatch } from '../src/sim/headless';
-import { autoLaunches, buildBattleOptions, defaultConfig } from '../src/config/sandboxConfig';
+import { autoLaunches, buildBattleOptions, defaultConfig, defaultTacticalConfig } from '../src/config/sandboxConfig';
 import { STARTER_TOPS } from '../src/content/tops';
 import { createBattleSetup, buildCareerConfig } from '../src/career/battle';
 import { UPGRADE_STATS, zeroRanks, type UpgradeRanks } from '../src/career/config';
@@ -23,6 +23,9 @@ describe('career vs v0.3.1 sandbox equivalence', () => {
           const setup = createBattleSetup({ battleId: 'x', seed, opponentSeed: 1, difficulty: 'normal', playerRankId: 'bronze-3', playerInstanceId: 'i', playerTopId: p.id });
           setup.opponent = { topId: o.id, rankId: 'bronze-3', ranks: zeroRanks() };
           const career = buildCareerConfig(setup, { definitionId: p.id, upgrades: zeroRanks() });
+          // v0.5: the career adds tactical abilities (player + AI at the difficulty) and the difficulty's aim skill.
+          sandbox.tactical = structuredClone(career.tactical);
+          sandbox.launch.aiAim = structuredClone(career.launch.aiAim);
           const a = new Battle(buildBattleOptions(sandbox, autoLaunches(sandbox))).runToEnd();
           const b = new Battle(buildBattleOptions(career, autoLaunches(career))).runToEnd();
           expect(b).toEqual(a);
@@ -36,7 +39,14 @@ describe('career vs v0.3.1 sandbox equivalence', () => {
     const d = defaultConfig(9);
     expect(c.player.overrides).toEqual({});
     expect(c.opponent.overrides).toEqual({});
-    expect({ ...c, player: 0, opponent: 0, launch: 0 }).toEqual({ ...d, player: 0, opponent: 0, launch: 0 });
+    expect({ ...c, player: 0, opponent: 0, launch: 0, tactical: 0 }).toEqual({ ...d, player: 0, opponent: 0, launch: 0, tactical: 0 });
+    // v0.5: abilities on with the default (approved) parameters; the AI plays at the battle's difficulty.
+    expect(c.tactical.enabled).toBe(true);
+    expect(c.tactical.player.controller).toBe('player');
+    expect(c.tactical.opponent).toEqual({ controller: 'ai', difficulty: 'hard' });
+    expect(c.tactical.script).toEqual([]);
+    expect(c.tactical.boost).toEqual(defaultTacticalConfig().boost);
+    expect(c.tactical.brace).toEqual(defaultTacticalConfig().brace);
     expect(c.launch.aiDistribution).toEqual({ poor: 0.05, good: 0.25, great: 0.45, perfect: 0.25 });
     expect(c.ruleset).toBe(DEFAULT_RULESET);
     expect(c.movement.naturalVariation).toBe(true);

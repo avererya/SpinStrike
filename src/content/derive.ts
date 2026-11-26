@@ -207,6 +207,11 @@ export const PARAMS_V041 = {
   launchSpeed: [0.3, 1.1] as const,
   impactSpinResist: [0, 0.4] as const,
   impactSpinDrain: [0.6, 1.3] as const,
+  /**
+   * v0.5 Directional Boost authority from Speed: 0.5 + speed/100 (linear,
+   * continues to the mapping ceiling). Speed's only effect on Boost.
+   */
+  boostPower: [0.5, 1.5] as const,
 };
 
 function derivePhysicsV041(s: GameplayStats, p: ResolvedParts, spinDirection: 1 | -1): TopPhysicsParams {
@@ -246,6 +251,7 @@ function derivePhysicsV041(s: GameplayStats, p: ResolvedParts, spinDirection: 1 
     spinDirection,
     launchSpinEnergy: BASE_LAUNCH_SPIN_ENERGY,
     launchSpeed: lerp(P.launchSpeed[0], P.launchSpeed[1], tUp(s.speed)),
+    boostPower: lerp(P.boostPower[0], P.boostPower[1], tUp(s.speed)),
   };
 }
 

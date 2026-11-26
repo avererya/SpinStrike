@@ -1,7 +1,7 @@
 /** Builds career battles: the setup record and the engine configuration. */
 import { getTop } from '../content/tops';
-import { defaultConfig, type SandboxConfig } from '../config/sandboxConfig';
-import { DIFFICULTY_LAUNCH, rankDef, type Difficulty } from './config';
+import { defaultConfig, defaultTacticalConfig, type SandboxConfig } from '../config/sandboxConfig';
+import { DIFFICULTY_LAUNCH, difficultyAiAim, rankDef, type Difficulty } from './config';
 import { effectiveStats } from './progression';
 import { generateOpponent, type OpponentBuild } from './opponents';
 import type { OwnedTop } from './save';
@@ -50,7 +50,7 @@ export function createBattleSetup(args: {
  * Engine configuration for a career battle: a FRESH default configuration
  * (approved v0.3.1 ruleset, never a sandbox config, so developer overrides
  * cannot leak in), with each side's upgraded effective stats and the
- * difficulty's AI launch distribution.
+ * difficulty's AI launch distribution, aim skill and tactical AI (v0.5).
  */
 export function buildCareerConfig(setup: CareerBattleSetup, player: Pick<OwnedTop, 'definitionId' | 'upgrades' | 'launchAim'>): SandboxConfig {
   const c = defaultConfig(setup.seed);
@@ -62,6 +62,14 @@ export function buildCareerConfig(setup: CareerBattleSetup, player: Pick<OwnedTo
   // v0.4.1: the player's remembered aim; the opponent aims with the seeded AI profile.
   c.launch.playerAim = clampAim(player.launchAim ?? DEFAULT_AIM);
   c.launch.opponentAim = 'auto';
+  // v0.5: the AI's aim skill follows the difficulty.
+  c.launch.aiAim = difficultyAiAim(setup.difficulty, setup.opponent.topId);
+  // v0.5: tactical abilities on in Quick Battles: the player controls slot 0,
+  // the opponent's tactical AI plays at the battle's difficulty. Same charges,
+  // costs and rules for both sides.
+  c.tactical = defaultTacticalConfig();
+  c.tactical.player = { controller: 'player', difficulty: setup.difficulty };
+  c.tactical.opponent = { controller: 'ai', difficulty: setup.difficulty };
   return c;
 }
 

@@ -104,6 +104,15 @@ export class TopBody {
   lastImpactDv = 0;
   readonly combat: TopCombatStats;
 
+  // --- tactical (v0.5) ---
+  /** Active Brace knockback reduction (0 = not braced). Set by the World each step. */
+  braceKnockback = 0;
+  /** Active Brace structural damage reduction (0 = not braced). */
+  braceDamage = 0;
+  /** Damage removed by Brace (HP) and braced impacts, accumulated by combat.ts. */
+  bracePrevented = 0;
+  braceImpacts = 0;
+
   constructor(
     readonly index: number,
     readonly params: TopPhysicsParams,

@@ -153,7 +153,14 @@ export function resolveTopPair(
       vn < RESTING_SPEED
         ? 0
         : Math.min(0.98, params.restitution * Math.sqrt(A.params.restitution * B.params.restitution));
-    const jn = ((1 + e) * vn) / invMassSum;
+    let jn = ((1 + e) * vn) / invMassSum;
+    // Defensive Brace (v0.5): a braced top plants its tip and absorbs part of
+    // the impact, so the contact impulse is smaller (a more inelastic
+    // collision). Applied equally to both tops, so momentum between them is
+    // conserved and kinetic energy can only decrease; never below the
+    // perfectly inelastic impulse, so the tops still stop approaching.
+    const keep = (1 - A.braceKnockback) * (1 - B.braceKnockback);
+    if (keep < 1) jn = Math.max(jn * keep, vn / invMassSum);
     if (report) report.jn = jn;
 
     // Tangential (friction) impulse, including rotational inertia.
@@ -188,7 +195,7 @@ export function resolveTopPair(
       const strikeSum = sA + sB;
       if (strikeSum > 0 && slipT > 0) {
         const keBefore = translationalKE(A) + translationalKE(B);
-        const js = (strikeSum * slipT) / invMassSum;
+        const js = (keep * strikeSum * slipT) / invMassSum;
         A.vx -= js * nx * A.invMass;
         A.vy -= js * ny * A.invMass;
         B.vx += js * nx * B.invMass;

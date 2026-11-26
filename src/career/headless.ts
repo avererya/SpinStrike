@@ -15,9 +15,18 @@ import { sampleQuality } from '../sim/launch';
 /** A decent human timing profile (Good/Great/Perfect most of the time). */
 export const HUMAN_LAUNCH: LaunchDistribution = { poor: 0.1, good: 0.3, great: 0.4, perfect: 0.2 };
 
-export function runCareerBattle(store: CareerStore, setup: CareerBattleSetup, playerLaunch: LaunchDistribution = HUMAN_LAUNCH): BattleResult {
+/**
+ * v0.5: the player's tactical skill in headless battles. There is no live
+ * input headlessly, so the player's abilities are driven by the tactical AI
+ * at this skill level (a stand-in for a human), or not used ('passive').
+ */
+export type HeadlessTactics = 'passive' | Difficulty;
+export const HUMAN_TACTICS: HeadlessTactics = 'normal';
+
+export function runCareerBattle(store: CareerStore, setup: CareerBattleSetup, playerLaunch: LaunchDistribution = HUMAN_LAUNCH, playerTactics: HeadlessTactics = HUMAN_TACTICS): BattleResult {
   const top = store.save!.tops.find((t) => t.instanceId === setup.playerInstanceId)!;
   const cfg = buildCareerConfig(setup, top);
+  cfg.tactical.player = playerTactics === 'passive' ? { controller: 'passive', difficulty: 'normal' } : { controller: 'ai', difficulty: playerTactics };
   const q = sampleQuality(playerLaunch, keyedUniform(RNG_STREAM.aiLaunch, hashKey(setup.seed, 77)));
   const [, opp] = autoLaunches(cfg);
   void aiLaunchQuality;
@@ -26,7 +35,7 @@ export function runCareerBattle(store: CareerStore, setup: CareerBattleSetup, pl
 }
 
 /** Plays and settles one headless career battle against a random opponent. */
-export function playHeadlessBattle(store: CareerStore, difficulty: Difficulty, seed: number, playerLaunch?: LaunchDistribution): { result: BattleResult; settled: SettledBattle; setup: CareerBattleSetup } {
+export function playHeadlessBattle(store: CareerStore, difficulty: Difficulty, seed: number, playerLaunch?: LaunchDistribution, playerTactics?: HeadlessTactics): { result: BattleResult; settled: SettledBattle; setup: CareerBattleSetup } {
   const save = store.save!;
   const top = store.activeTop!;
   const setup = createBattleSetup({
@@ -38,7 +47,7 @@ export function playHeadlessBattle(store: CareerStore, difficulty: Difficulty, s
     playerInstanceId: top.instanceId,
     playerTopId: top.definitionId,
   });
-  const result = runCareerBattle(store, setup, playerLaunch);
+  const result = runCareerBattle(store, setup, playerLaunch, playerTactics);
   const settled = store.settleBattle(setup, result)!;
   return { result, settled, setup };
 }
