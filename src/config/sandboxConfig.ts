@@ -19,6 +19,7 @@ import {
   type LaunchZones,
   type TopLaunch,
 } from '../sim/launch';
+import type { GameplayStats } from '../content/stats';
 import type { CollisionParamKey, CombatParamKey, StadiumParamKey, TopOverrideKey } from './params';
 
 /**
@@ -33,6 +34,13 @@ export interface TopSlotConfig {
   topId: string;
   /** Only parameters the developer changed; others come from the definition. */
   overrides: TopOverrides;
+  /**
+   * Career (v0.4): explicit effective stats replacing the definition's base
+   * stats (upgrades). Undefined for every sandbox configuration.
+   */
+  stats?: GameplayStats;
+  /** Career (v0.4): effective critical chance (0–1). Undefined = base chance. */
+  critChance?: number;
 }
 
 export interface PresentationConfig {
@@ -200,7 +208,7 @@ const COMBAT_OVERRIDE_KEYS = new Set<string>(['maxHealth', 'attack', 'defense', 
 
 /** Effective physics params for a slot: definition-derived values + overrides. */
 export function resolveTopParams(slot: TopSlotConfig, ruleset: Ruleset = DEFAULT_RULESET): TopPhysicsParams {
-  const base = deriveTopPhysics(getTop(slot.topId), { ruleset });
+  const base = deriveTopPhysics(getTop(slot.topId), { ruleset, stats: slot.stats });
   const out: TopPhysicsParams = { ...base };
   for (const [k, v] of Object.entries(slot.overrides)) {
     if (COMBAT_OVERRIDE_KEYS.has(k)) continue;
@@ -211,7 +219,7 @@ export function resolveTopParams(slot: TopSlotConfig, ruleset: Ruleset = DEFAULT
 
 /** Effective combat stats for a slot: derived values + overrides. */
 export function resolveTopCombat(slot: TopSlotConfig, ruleset: Ruleset = DEFAULT_RULESET): TopCombatStats {
-  const out = deriveTopCombat(getTop(slot.topId), { ruleset });
+  const out = deriveTopCombat(getTop(slot.topId), { ruleset, stats: slot.stats, critChance: slot.critChance });
   const o = slot.overrides as Record<string, number | undefined>;
   for (const k of COMBAT_OVERRIDE_KEYS) {
     const v = o[k];
