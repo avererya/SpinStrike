@@ -48,7 +48,8 @@ body { -webkit-tap-highlight-color: transparent; }
    applied on desktop or Android. */
 @supports (-webkit-touch-callout: none) {
   @media (hover: none) and (pointer: coarse) {
-    #app { --ios-top-extra: 6px; }
+    /* v0.3.1: 20 px (16 px in landscape) of clearance below the blurred top edge. */
+    #app { --ios-top-extra: 20px; }
     /* ≥ 16 px stops iOS Safari from zooming the page when a dropdown is focused. */
     select { font-size: 16px; }
   }
@@ -333,7 +334,8 @@ input[type='range'] { width: 100%; accent-color: var(--accent); min-height: 28px
 
 /* ----------------------------------------------------------------- mobile */
 @media (max-width: 760px) {
-  .toolbar { padding: 6px 8px; gap: 6px; }
+  /* Keep the top padding (safe area + iOS clearance): the shorthand would reset it. */
+  .toolbar { padding: 6px 8px; padding-top: calc(6px + env(safe-area-inset-top) + var(--ios-top-extra)); gap: 6px; }
   .brand { display: none; }
   .pick > span { display: none; }
   .vs { padding-top: 0; }
@@ -368,7 +370,8 @@ input[type='range'] { width: 100%; accent-color: var(--accent); min-height: 28px
 /* Landscape phones: HUD in the corners, compact toolbar. */
 @media (max-height: 500px) and (orientation: landscape) {
   .brand, .pick > span, .btn-label { display: none; }
-  .toolbar { padding: 4px 8px; gap: 4px 8px; flex-wrap: nowrap; overflow-x: auto; }
+  .toolbar { padding: 4px 8px; padding-top: calc(4px + env(safe-area-inset-top) + var(--ios-top-extra)); gap: 4px 8px; flex-wrap: nowrap; overflow-x: auto; }
+  @supports (-webkit-touch-callout: none) { #app { --ios-top-extra: 16px; } }
   .tb-group { flex-wrap: nowrap; }
   .vs { padding-top: 0; }
   select { min-width: 96px; }

@@ -50,7 +50,7 @@ export const STARTER_TOPS: readonly TopDefinition[] = [
     name: 'Tempest',
     topClass: 'Stamina',
     description: 'Smooth, efficient needle-tip spinner built to outlast everything.',
-    stats: { health: 69, attack: 40, defense: 65, stamina: 85, speed: 50, weight: 55 },
+    stats: { health: 63, attack: 40, defense: 65, stamina: 75, speed: 50, weight: 55 },
     parts: { core: 'core-leaf', ring: 'zephyr-halo', disc: 'outer-rim', tip: 'needle-point' },
     palette: { primary: 0x0f9a5c, secondary: 0x0a3d2a, accent: 0xe2b33c, metal: 0xd8c78f },
     spinDirection: 1,

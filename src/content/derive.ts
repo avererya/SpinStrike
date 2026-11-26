@@ -149,6 +149,8 @@ function derivePhysicsV03(s: GameplayStats, p: ResolvedParts, spinDirection: 1 |
     contactFriction: lerp(P.contactFriction[0], P.contactFriction[1], t(s.attack)) * ring.frictionFactor,
     ringStrike: (ring.strikeV03 ?? ring.strike) * lerp(P.ringStrike[0], P.ringStrike[1], t(s.attack)),
     bladeExposure: ring.bladeExposure ?? 1,
+    impactSpinLossFactor: ring.impactSpinLossFactor ?? 1,
+    damageCapFactor: ring.damageCapFactor ?? 1,
     impactSpinDrain: lerp(P.impactSpinDrain[0], P.impactSpinDrain[1], t(s.attack)),
     impactSpinResist: lerp(P.impactSpinResist[0], P.impactSpinResist[1], t(s.stamina)),
     spinDirection,

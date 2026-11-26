@@ -2,6 +2,20 @@
 
 All notable changes to SpinStrike are documented here.
 
+## [0.3.1] — 2026-11-26 · Final Combat Refinement
+
+### Changed
+- **Draw window 0.25 s → 0.10 s** (`DEFAULT_DRAW_WINDOW`, 24 steps at 240 Hz). Overall draws 4.9 % → 2.3 %; mirror draws 14–19 % → 1–8 %. Symmetric resolution, narrow victory, draw rematch, final stamina snapshots and "no combat after elimination" are unchanged. The legacy v0.2 ruleset still uses 0.
+- **Tempest rebalance by part characteristics.** Zephyr Halo now has two new reusable ring properties: `damageCapFactor` 0.45 (a rounded, energy-absorbing profile flattens the hardest hits taken, for every attacker alike) and `impactSpinLossFactor` 1.5 (the price: deflecting scrubs spin on impact). Tempest stats: health 69 → 63, stamina 85 → 75 (compensation so Titan and Phantom do not collapse against the tougher ring). Inferno, Titan and Phantom are unchanged. Inferno vs Tempest 94 % → ~70 %, Titan vs Tempest 24–26 % → ~30 %.
+- **Mobile top spacing (iOS).** The toolbar's top padding (safe area plus clearance) was being reset by the ≤ 760 px mobile `padding` shorthand; it is now kept. On iOS touch devices the toolbar gets 20 px of extra clearance (16 px in landscape) on top of the safe-area inset. Desktop and non-iOS layouts are unchanged. Three.js resolution and stadium rendering are untouched.
+- Version 0.3.1.
+
+### Added
+- Part/physics fields `damageCapFactor` and `impactSpinLossFactor` (default 1 = neutral; absent in the v0.2 ruleset), tests in `tests/v031.test.ts`, raw balance runs in `docs/balance/v0.3.1/`.
+
+### Known issues
+- Inferno vs Tempest is ~70 % (target 65 %, 70–75 % accepted) and ~18 % of those battles still end inside 10 s (opening-clash bursts/knockouts, as in v0.3). Titan vs Tempest is ~30 % (target 35 %). Tempest has fewer stamina points than before, so its stamina-class identity rests more on its ring and tip. iOS blur fix is **not verified on a physical iPhone**; deployment not verified from this environment.
+
 ## [0.3.0] — 2026-11-26 · Launch, Critical Hits & Combat Refinement
 
 ### Added

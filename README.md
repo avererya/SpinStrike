@@ -1,7 +1,7 @@
-# SpinStrike — v0.3 Launch, Critical Hits & Combat Refinement
+# SpinStrike — v0.3.1 Final Combat Refinement (on v0.3 Launch, Critical Hits & Combat Refinement)
 
 SpinStrike is a browser-based, physics-driven spinning-top combat game. Tops, names and art are all original.
-This repository holds **v0.3**: a combat sandbox in which two procedurally modelled 3D tops battle
+This repository holds **v0.3.1** (v0.3 plus a draw window of 0.10 s, a Tempest ring refinement and mobile top spacing): a combat sandbox in which two procedurally modelled 3D tops battle
 autonomously in a concave stadium. v0.2 added health, physics-based collision damage, three finish
 types (burst, knockout, spin) with cinematic finishing presentations, a combat HUD and a headless
 balance simulator. **v0.3 adds** a timing-based launch minigame, seeded AI launch quality, critical
@@ -45,7 +45,7 @@ npm run build      # outputs static files to dist/
 Cloudflare Pages settings: build command `npm run build`, output directory `dist`, environment variable `NODE_VERSION=20`.
 The build uses relative asset paths (`base: './'`), so it also works from a sub-path.
 
-**Version information (v0.3).** The game version comes from `package.json` and the build id is the short commit SHA, taken from Cloudflare Pages' `CF_PAGES_COMMIT_SHA` (or `git rev-parse` locally). Both are injected at build time (`vite.config.ts` → `src/version.ts`), so nothing has to be edited by hand. They appear next to the logo in the toolbar (e.g. `v0.3.0 · 1a2b3c4`) and at the top of the developer panel; the build time is in the tooltip.
+**Version information (v0.3).** The game version comes from `package.json` and the build id is the short commit SHA, taken from Cloudflare Pages' `CF_PAGES_COMMIT_SHA` (or `git rev-parse` locally). Both are injected at build time (`vite.config.ts` → `src/version.ts`), so nothing has to be edited by hand. They appear next to the logo in the toolbar (e.g. `v0.3.1 · 1a2b3c4`) and at the top of the developer panel; the build time is in the tooltip.
 
 **Caching.** `public/_headers` (copied to `dist/`) tells Cloudflare Pages to revalidate `index.html` and `/` on every load (`no-cache, must-revalidate`), never cache `version.json`, and cache the content-hashed `/assets/*` bundles forever. A new deployment is therefore picked up on the next load, without stale HTML pointing at old bundles. The build also writes `dist/version.json`; the running app fetches it on load and whenever the tab becomes visible again, and if a newer build is live it shows a small **"A newer version is available · Reload / Later"** notice. It never reloads by itself, so an active battle is never interrupted and no reload loop is possible.
 
@@ -119,13 +119,13 @@ On phones in portrait, speed and spin are hidden behind the **details** button u
 - **Knockout finish:** the top escapes over the rim.
 - **Spin finish:** the top stops spinning.
 
-If both tops are eliminated on the same physics step, the battle is a draw. **If both stop spinning within 0.25 simulated seconds of each other, it is also a draw** (v0.3 draw window, see *Combat model*). Reaching the maximum duration is a timeout, with no winner.
+If both tops are eliminated on the same physics step, the battle is a draw. **If both stop spinning within 0.10 simulated seconds of each other, it is also a draw** (draw window, see *Combat model*). Reaching the maximum duration is a timeout, with no winner.
 
 **Critical hits (v0.3).** Every damaging impact gives each top a 5 % chance (per top, configurable) of a critical hit that deals 2× structural damage. A critical hit shows a golden damage number with a **CRITICAL HIT** label on a dark pill, a golden spark burst and a larger impact ring. These appear by default even when ordinary damage numbers are off, and can be turned off separately.
 
 A short finishing presentation plays. The **result card** then shows:
 - The winner, the defeated top and the finish type, with a **NARROW VICTORY** badge when a spin win was decided with the winner at ≤ 2 % stamina (presentation only).
-- For a **DRAW**, the reason: "both tops stopped spinning almost simultaneously (0.04 s apart, within the 0.25 s draw window)" or "eliminated on the same physics step".
+- For a **DRAW**, the reason: "both tops stopped spinning almost simultaneously (0.04 s apart, within the 0.10 s draw window)" or "eliminated on the same physics step".
 - Each top's launch quality and bonus, health and stamina left at the decisive moment, damage dealt, and hits (critical hits).
 - **More statistics** (collapsed): critical damage dealt, crits received, damage taken, each top's strongest hit (and whether it was critical), collisions.
 - The strongest single hit, the exact duration and the seed.
@@ -288,6 +288,8 @@ Each stat now has one job. Every constant is provisional tuning (`PARAMS_V03` in
 
 **Stability** now comes from the tip: `stability = tip.stability + weight term`, clamped to 0.05–0.95 (Rush Flat 0.45, Bastion Ball 0.64, Needle Point 0.55, Vector Semi-Flat 0.59). In v0.2, defense fed stability, impact spin resistance and restitution at once, which is what let Titan outlast Phantom despite equal stamina stats. Parts also carry v0.3 values where v0.2 tuning was replaced: tip pivot friction (`spinFrictionV03`: Rush Flat 0.10, Bastion Ball 0.238, Needle Point 0.207), Blaze Fang blade strike (`strikeV03` 0.0176) and Zephyr Halo **blade exposure** (0.37, below).
 
+**Deflective ring profile (v0.3.1).** Two further reusable ring characteristics (defaults are neutral, so every other ring is unchanged and the v0.2 ruleset ignores them): `damageCapFactor` scales the severity ceiling of hits *taken* by the wearer (< 1 flattens the hardest impacts while leaving moderate ones nearly unchanged), and `impactSpinLossFactor` multiplies the spin the wearer loses in impacts (> 1 = a deflective profile scrubs rotational energy: the trade-off between structural protection and rotational energy retention). Zephyr Halo uses 0.45 and 1.5. Both apply to whoever wears the ring, against every attacker, so they are ordinary part properties, not matchup bonuses; a future ring can pick any combination.
+
 **Blade exposure (v0.3).** A ring part's `bladeExposure` (0–1, default 1) is the share of an opposing blade strike that its surface exposes. It multiplies the attacker's rotational (blade) term in the damage formula, so Tempest's smooth, rounded Zephyr Halo takes about a third of the blade damage of a fully exposed ring while still taking full translational (impact) damage. It is a property of the defender's part, applies to every attacker equally, and is shown in the formula below.
 
 ### Launch quality (v0.3)
@@ -303,7 +305,7 @@ The launch multiplies each top's **starting rotational energy**: `E = E₀ · (1
 
 ### Draw window and narrow victories (v0.3)
 
-- When one top stops spinning while the other is still spinning, the battle enters a **resolving** phase of `floor(window × 240)` simulation steps (default 0.25 s = 60 steps, inclusive). It counts simulated time, so it is independent of frame rate and playback speed.
+- When one top stops spinning while the other is still spinning, the battle enters a **resolving** phase of `floor(window × 240)` simulation steps (default 0.10 s = 24 steps, inclusive; v0.3 used 0.25 s). It counts simulated time, so it is independent of frame rate and playback speed.
 - During that window combat is off and the stopped top is removed from contact: it cannot deal damage, cause a knockout or push the survivor.
 - If the survivor also stops within the window, the result is a **near-simultaneous draw** (with the gap reported). Otherwise the survivor wins. Either way, the result time and both tops' snapshots are taken at the **first** stop.
 - Burst and knockout finishes stay decisive immediately; same-step eliminations are still draws. A window of 0 reproduces the v0.2 rule.
@@ -417,26 +419,27 @@ Damaging hits add sparks and an impact ring scaled to damage ÷ max health. Ordi
 
 ---
 
-## Balance (v0.3, Classic Bowl)
+## Balance (v0.3.1, Classic Bowl)
 
-Full report: [`docs/balance/BALANCE_REPORT.md`](docs/balance/BALANCE_REPORT.md) (v0.3 section first). Raw runs are in [`docs/balance/v0.3/`](docs/balance/v0.3/) (A: legacy baseline, B1–B4: each new mechanic alone, D1–D8: final validation, 8,000 battles each).
+Full report: [`docs/balance/BALANCE_REPORT.md`](docs/balance/BALANCE_REPORT.md) (v0.3.1 section first). Raw runs: [`docs/balance/v0.3.1/`](docs/balance/v0.3.1/) (final seeds 1–500 and 100001–100500, plus the v0.3 code re-run at the same seeds and window for comparison; 8,000 battles each) and [`docs/balance/v0.3/`](docs/balance/v0.3/).
 
-Slot-averaged win rate of the row top against the column top, **distributed launches, crits on, unseen seeds 100001–100500** (draws and timeouts count as neither):
+Slot-averaged win rate of the row top against the column top, **distributed launches, crits on, seeds 1–500 (100001–100500 in brackets)**:
 
 | | Inferno | Titan | Tempest | Phantom | Target row |
 | --- | --- | --- | --- | --- | --- |
-| **Inferno** | 44 % | 31 % | **94 %** | 40 % | 35 / 65 / 50 vs Titan, Tempest, Phantom |
-| **Titan** | 68 % | 43 % | 24 % | 44 % | 65 / 35 / 50 |
-| **Tempest** | 6 % | 76 % | 48 % | 59 % | 35 / 65 / 50 |
-| **Phantom** | 60 % | 44 % | 41 % | 41 % | 50 / 50 / 50 |
+| **Inferno** | 47 % (47) | 33 % (32) | **71 % (69)** | 43 % (40) | 35 / 65 / 50 |
+| **Titan** | 67 % (68) | 47 % (47) | 31 % (30) | 45 % (47) | 65 / 35 / 50 |
+| **Tempest** | 29 % (31) | 69 % (71) | 49 % (50) | 50 % (52) | 35 / 65 / 50 |
+| **Phantom** | 56 % (60) | 49 % (47) | 50 % (48) | 46 % (46) | 50 / 50 / 50 |
 
-(Mirror cells are below 50 % because draws, about 14–18 % of mirrors with the 0.25 s window, are neither win nor loss.) Non-mirror overall win rates: Inferno 55 %, Titan 48 %, Tempest 47 %, Phantom 43–48 %. Titan vs Inferno and Titan vs Tempest are now within a few points of the targets. **Inferno vs Tempest (94 % / 6 %) is not fixed**, and Phantom is slightly below the 45–55 % band in some runs. See the report and *Known limitations*.
+Non-mirror overall: Inferno 49 / 47 %, Titan 48 / 48 %, Tempest 49 / 51 %, Phantom 52 / 52 %. Draws 2.3 % overall. See the report for finishes, durations and mirror fairness.
 
 ## Known limitations
 
+- **iOS top spacing is unverified on a physical iPhone.** v0.3.1 adds 20 px (16 px landscape) of clearance on iOS touch devices and fixes a CSS rule that reset the safe-area padding on narrow screens; whether the blurred band is cleared must be checked on a device after deployment.
 - **Not verified on real devices.** All screenshots use headless Chromium with software WebGL. The iOS top-of-screen changes (toolbar-coloured background, safe-area padding moved into the toolbar, no backdrop blur) are a mitigation; **the blur is not confirmed fixed** until checked on an iPhone. Cloudflare deployment was not verifiable from this environment.
-- **Balance misses one target.** Inferno vs Tempest is about 94 %: Tempest's smooth ring (blade exposure 0.37) and extra health were the only non-hidden levers that kept it from 100 %, and pushing further collapsed Phantom vs Tempest. Fixing it needs a design decision (for example a Tempest-specific ring or tip, or moving Inferno's burst window). Phantom's overall win rate is 43–48 %.
-- **Draw window** produces ~14–18 % draws in mirror matchups and ~5 % overall at 0.25 s (2.4 % at 0.1 s, 0.7 % at 0 s). It is a design setting; 0.1 s is a reasonable compromise.
+- **Balance is close but not exact.** Inferno vs Tempest is ~70 % (target 65 %, 70–75 % accepted) and Titan vs Tempest ~30 % (target 35 %). Getting there meant lowering Tempest's stamina (85 → 75) and health (69 → 63) to offset its tougher ring; Inferno vs Tempest still ends within 10 s in ~18 % of battles. The Inferno–Tempest and Titan–Tempest results move together (more protection helps against both), so further gains need a different lever such as tactical abilities or equipment.
+- **Draw window** is 0.10 s: 2.3 % draws overall and 1–8 % in mirrors (v0.3's 0.25 s gave ~5 % overall and 14–19 % in mirrors; 0 s gives 0.7 %).
 - **Launch skill matters a lot.** A Perfect player against the AI distribution wins about 60 % of non-mirror battles versus 48 % for an average (distributed) launch, and 71–86 % of mirror matches (report D5 vs D6). The +10 % energy is a large edge in close matchups; this is within the spec's numbers but worth a design look.
 - Stamina-heavy matchups run ~42–69 s, close to targets; Inferno vs Tempest runs ~17 s (target 5–15 s for overwhelming advantage). About 3 % of battles end within 5 s, almost all Inferno vs Tempest opening-clash bursts or knockouts.
 - Collision shapes are circles; ring geometry is approximated by friction, strike and exposure parameters. The knockout check is a 2.5D estimate. Debris is cosmetic. The tilt state is kinematic.

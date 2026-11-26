@@ -225,8 +225,8 @@ export function resolveTopPair(
     // energy. Both terms only ever remove energy.
     const chatter = CHATTER * jn * Math.abs(vt) + impactEnergy;
     const w = params.statSpinDrainWeight;
-    const lossA = params.energyLoss * chatter * weightedDrain(B.params.impactSpinDrain, w) * (1 - w * A.params.impactSpinResist);
-    const lossB = params.energyLoss * chatter * weightedDrain(A.params.impactSpinDrain, w) * (1 - w * B.params.impactSpinResist);
+    const lossA = params.energyLoss * chatter * weightedDrain(B.params.impactSpinDrain, w) * (1 - w * A.params.impactSpinResist) * lossFactor(A.params.impactSpinLossFactor);
+    const lossB = params.energyLoss * chatter * weightedDrain(A.params.impactSpinDrain, w) * (1 - w * B.params.impactSpinResist) * lossFactor(B.params.impactSpinLossFactor);
     A.removeSpinEnergy(lossA);
     B.removeSpinEnergy(lossB);
     A.impactEnergyReceived += impactEnergy;
@@ -345,4 +345,9 @@ export function resolveWall(
     };
   }
   return null;
+}
+
+/** Ring-profile multiplier on impact spin loss (v0.3.1); undefined or invalid = 1. */
+function lossFactor(v: number | undefined): number {
+  return v !== undefined && Number.isFinite(v) && v >= 0 ? v : 1;
 }

@@ -34,7 +34,7 @@ This document records the long-term vision and the design decisions made so far.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Inferno | Attack | Red/black/silver, jagged ring. Fast and aggressive, hits hard, burns spin | 63 | 95 | 35 | 62 | 85 | 50 |
 | Titan | Defense | Blue/silver, thick armoured ring. Heavy, stable, settles in the centre | 72 | 82 | 82 | 60 | 30 | 95 |
-| Tempest | Stamina | Emerald/gold, smooth ring. Efficient with long endurance | 69 | 40 | 65 | 85 | 50 | 55 |
+| Tempest | Stamina | Emerald/gold, smooth ring. Efficient with long endurance | 63 | 40 | 65 | 75 | 50 | 55 |
 | Phantom | Balance | Purple/silver/black, moderate winged ring. Well-rounded | 69 | 72 | 65 | 67 | 65 | 65 |
 
 - Names, classes, visual identity and physical identity are **[Confirmed]**.
@@ -179,11 +179,13 @@ Launch minigame, seeded AI launch quality, critical hits, spin-finish draw windo
 4. Critical hits: 5 % base chance, 2× structural damage only, one roll per damaging impact per top. [Confirmed]
 5. Starter rebalance targets: Inferno vs Titan 35 %, Inferno vs Tempest 65 %, Titan vs Tempest 35 %, other pairs 50 %. No hidden class multipliers, forced winners, rubber-banding, matchup overrides or random stamina loss. [Confirmed]
 6. Inferno is a glass cannon; Titan loses its overlapping defense, stability and stamina advantages. [Confirmed]
-7. Draw window 0.25 s of simulation time; the defeated top cannot deal damage. [Confirmed]
+7. Draw window 0.25 s of simulation time (changed to 0.10 s in v0.3.1 after playtesting); the defeated top cannot deal damage. [Confirmed]
 8. Narrow victory label at ≤ 2 % winner stamina (presentation only). [Confirmed]
 9. A draw offers a rematch with a new seed, fresh launch and new AI draw. [Confirmed]
 10. Mirror matches must show no P1/P2 bias. [Confirmed]
 
 **Implementation assumptions:** blade exposure on ring parts; stability from tips; stamina-based impact spin resistance; `V03_COLLISION` defaults; sweep 1.25 s and 8 s timeout.
+
+**Status after v0.3.1:** Inferno vs Tempest ≈ 70 %, Titan vs Tempest ≈ 30 %, draws 2.3 % (mirrors 1–8 %). Tempest's ring is a deflective profile (`damageCapFactor` 0.45, `impactSpinLossFactor` 1.5), reusable for future equipment; its stats were lowered (health 63, stamina 75) to keep Titan and Phantom competitive. [Implementation assumption]
 
 **Status after v0.3:** Titan vs Inferno/Tempest and the Phantom matchups are close to target; Inferno vs Tempest is ≈ 94 % (target 65 %). Draw rates in mirrors are high at 0.25 s (consider 0.1 s).

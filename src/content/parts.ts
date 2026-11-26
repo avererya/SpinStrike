@@ -52,6 +52,10 @@ export interface RingPart {
   strikeV03?: number;
   /** v0.3: share of an opposing blade strike this ring's surface exposes (0–1, default 1). */
   bladeExposure?: number;
+  /** v0.3.1: multiplier on impact spin loss of the wearer (default 1). Deflective profiles scrub spin (>1). */
+  impactSpinLossFactor?: number;
+  /** v0.3.1: scales the severity ceiling of hits taken (default 1). Low = the hardest impacts are flattened. */
+  damageCapFactor?: number;
   /** Number of blades / lobes for the procedural model. */
   lobes: number;
 }
@@ -133,7 +137,7 @@ export const TIPS: Record<string, TipPart> = {
 export const RINGS: Record<string, RingPart> = {
   'blaze-fang': { id: 'blaze-fang', name: 'Blaze Fang', style: 'jagged', radius: 0.025, frictionFactor: 1.25, strike: 0.014, strikeV03: 0.0176, lobes: 6 },
   'aegis-wall': { id: 'aegis-wall', name: 'Aegis Wall', style: 'armored', radius: 0.026, frictionFactor: 0.7, strike: 0.004, lobes: 8 },
-  'zephyr-halo': { id: 'zephyr-halo', name: 'Zephyr Halo', style: 'smooth', radius: 0.0245, frictionFactor: 0.6, strike: 0.002, bladeExposure: 0.37, lobes: 12 },
+  'zephyr-halo': { id: 'zephyr-halo', name: 'Zephyr Halo', style: 'smooth', radius: 0.0245, frictionFactor: 0.6, strike: 0.002, bladeExposure: 0.37, damageCapFactor: 0.45, impactSpinLossFactor: 1.5, lobes: 12 },
   'eclipse-wing': { id: 'eclipse-wing', name: 'Eclipse Wing', style: 'winged', radius: 0.025, frictionFactor: 1, strike: 0.008, lobes: 4 },
 };
 
