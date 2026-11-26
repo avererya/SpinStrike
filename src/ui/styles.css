@@ -618,3 +618,19 @@ input[type='range'] { width: 100%; accent-color: var(--accent); min-height: 28px
 }
 /* Career result card: the rewards panel carries the title; hide the sandbox headline. */
 .result.career .result-title, .result.career .result-badge, .result.career .result-sub { display: none; }
+.icon-btn { flex: none; }
+.chips { min-width: 0; }
+@media (max-width: 380px) {
+  .ver { display: none; }
+  .topbar { gap: 6px; padding-left: 8px; padding-right: 8px; }
+  .brand-btn { font-size: 16px; }
+  .chip { padding: 2px 7px; font-size: 11px; }
+}
+/* Career result: the finish-time chip would overlap the card on small screens. */
+.career-battle[data-status='finished'] .hud-centre { display: none; }
+@media (max-height: 500px) and (orientation: landscape) {
+  .rw-title { font-size: 20px; }
+  .rewards { gap: 4px; margin-bottom: 6px; }
+  .gain strong { font-size: 18px; }
+  .rw-gains { gap: 18px; }
+}

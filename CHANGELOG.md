@@ -2,6 +2,28 @@
 
 All notable changes to SpinStrike are documented here.
 
+## [0.4.0] — 2026-11-26 · Progression Foundation
+
+### Added
+- **Career mode**: starter selection, Garage, Quick Battle with difficulty, rewards (Credits, XP), result screen with rewards, level-ups and rank progress, Collection, Career (Bronze III/II/I and championship-qualification message), Top History (Overview, Matchups, Stadiums), Settings (export, import, reset with typed confirmation).
+- **Progression**: levels 1-30 (XP curve 100 + 25(L-1)), six upgradeable attributes with ten ranks each and the approved costs (83,400 Credits per Common top), level-gated ranks, rarity cost multipliers in config (Common 1x, Rare 1.25x, Epic 1.5x, Legendary 2x with exact totals).
+- **Persistence**: versioned save schema (v1) with validation, migrations framework, backup/recovery, duplicate-claim protection, export/import; career and sandbox are stored separately.
+- **Opponents**: bounded randomised Bronze builds; difficulty changes only AI launch quality.
+- **Per-top statistics** with a 100-battle recent history; extensible matchup/stadium tables.
+- 3D rotating previews for menus (one shared WebGL context).
+- `docs/PROGRESSION.md`, `docs/SAVE_SCHEMA.md`, `docs/economy/v0.4-economy-report.md`, `scripts/economy.ts`; 38+ new tests.
+
+### Changed
+- The app now opens to the game shell; the sandbox moved to the ☰ menu (unchanged, with a Menu button).
+- **v0.3 stat mapping ceiling raised from 100 to 150** (`STAT_MAPPING_CEILING`) so upgraded stats above 100 (e.g. Inferno speed 106) keep scaling linearly. Output for every stat <= 100, i.e. every unupgraded top and all sandbox configurations, is identical (verified by test).
+- Version 0.4.0.
+
+### Not changed
+- Combat, physics, launch timing, critical hits, balance, unupgraded starter configs, the iOS top-spacing fix, approved upgrade costs.
+
+### Known issues
+- Difficulty barely changes win rate (launch quality only), so Expert's 2x rewards are over-generous (see report). Stamina upgrades are much stronger than Speed upgrades. iOS spacing and real-device behaviour not verified on hardware.
+
 ## [0.3.1] — 2026-11-26 · Final Combat Refinement
 
 ### Changed

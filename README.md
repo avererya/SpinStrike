@@ -1,13 +1,14 @@
-# SpinStrike — v0.3.1 Final Combat Refinement (on v0.3 Launch, Critical Hits & Combat Refinement)
+# SpinStrike — v0.4 Progression Foundation (on v0.3.1 combat)
 
 SpinStrike is a browser-based, physics-driven spinning-top combat game. Tops, names and art are all original.
-This repository holds **v0.3.1** (v0.3 plus a draw window of 0.10 s, a Tempest ring refinement and mobile top spacing): a combat sandbox in which two procedurally modelled 3D tops battle
-autonomously in a concave stadium. v0.2 added health, physics-based collision damage, three finish
-types (burst, knockout, spin) with cinematic finishing presentations, a combat HUD and a headless
-balance simulator. **v0.3 adds** a timing-based launch minigame, seeded AI launch quality, critical
-hits, a near-simultaneous spin-finish draw window, narrow-victory and draw-rematch presentation,
-a starter-top rebalance with a cleaner stat → physics mapping, visible version information and
-iOS top-of-screen mitigations. It is still a development sandbox, not the player-facing game.
+**v0.4 turns the combat sandbox into a persistent progression game**: choose a starter top, battle random Bronze
+opponents in Quick Battle, earn Credits and XP, level up, buy permanent upgrades, and climb the career ranks.
+The v0.3.1 combat (launch minigame, critical hits, 0.10 s draw window, physics, balance) is unchanged; the
+original sandbox is kept as a separate developer mode that never touches your career.
+
+See [Progression and economy](docs/PROGRESSION.md), [Save schema](docs/SAVE_SCHEMA.md) and
+[the economy report](docs/economy/v0.4-economy-report.md). The text below the v0.4 section documents the v0.3.1
+sandbox and combat engine, which remain accurate.
 
 Live: https://spinstrike.pages.dev/ (Cloudflare Pages, deployed from `main`).
 
@@ -16,6 +17,20 @@ Live: https://spinstrike.pages.dev/ (Cloudflare Pages, deployed from `main`).
 - **Physics is independent of rendering.** `src/sim` has no Three.js or DOM imports, so it runs the same in the browser, in tests and in the headless simulator.
 
 ---
+
+## v0.4: the game (career mode)
+
+Primary loop: **Garage → Quick Battle → rewards → upgrade → level up → advance career → repeat.**
+
+- **Navigation:** bottom tabs Garage / Battle / Collection / Career; Settings and Sandbox are in the ☰ menu.
+- **New career:** pick Inferno, Titan, Tempest or Phantom (Common, v0.3.1 stats). Start: level 1, 500 Credits, Bronze III, Classic Arena.
+- **Garage:** rotating 3D preview, level and XP, base vs effective stats, upgrade progress, Quick Battle / Upgrade / Top History.
+- **Upgrades:** Health, Attack, Defense, Stamina, Speed and Critical Chance, ten ranks each, gated by top level, paid with Credits.
+- **Quick Battle:** random Bronze opponent, difficulty Easy to Expert (changes AI launch quality and reward multiplier), Classic Arena. Rewards are granted once per completed battle.
+- **Collection / Career / Top History / Settings** (export, import, reset). Saves live in the browser (`localStorage`) only, so export a backup.
+- **Sandbox** (☰ menu): the v0.3.1 developer sandbox with manual matchups, seeds, dev panel and replays. It never awards or records career data.
+
+Code layout additions: `src/career/` (pure TypeScript rules, save schema, store, opponents, headless runner), `src/ui/game/` (shell and screens), `src/render/topPreview.ts` (menu 3D previews). Scripts: `npx tsx scripts/economy.ts` regenerates the economy report.
 
 ## Quick start
 
