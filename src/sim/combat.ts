@@ -15,7 +15,8 @@ import { RNG_STREAM, keyedUniform } from './rng';
  * ## Damage formula (per damaging impact, attacker A → defender B)
  *
  *   gate    : no damage unless vₙ > v_min           (minimum damaging impact speed, m/s)
- *   v_blade = ringStrike_A · |ω_A| · r_A            A's blade (rotational) strike speed, m/s
+ *   v_blade = ringStrike_A · |ω_A| · r_A · x_B      A's blade (rotational) strike speed, m/s
+ *                                                  (x_B = B's ring blade exposure, 1 unless set; v0.3)
  *   E_A     = ½ · μ · vₙ · (k_imp · vₙ + k_rot · v_blade)   strike energy, J
  *   x       = (E_A / E_ref)^p                       impact severity (dimensionless)
  *   S       = x / (1 + x / x_cap)                   soft cap: ≈ x for normal hits, → x_cap for extreme ones
@@ -74,12 +75,12 @@ export interface CombatParams {
 }
 
 export const DEFAULT_COMBAT: CombatParams = {
-  damageScale: 50,
+  damageScale: 54,
   impactScale: 1,
-  rotationalContribution: 10,
+  rotationalContribution: 9.4,
   energyReference: 0.005,
-  severityExponent: 0.5,
-  severityCap: 2,
+  severityExponent: 0.4,
+  severityCap: 2.45,
   attackReference: 65,
   defenseEffectiveness: 0.5,
   defenseReference: 100,
@@ -252,10 +253,12 @@ export function strikeEnergy(
   attackerOmega: number,
   attackerRadius: number,
   p: CombatParams,
+  defenderExposure = 1,
 ): number {
   const v = finite(vn);
   if (!(v > Math.max(0, p.minImpactSpeed))) return 0;
-  const blade = Math.max(0, finite(attackerRingStrike)) * Math.abs(finite(attackerOmega)) * Math.max(0, attackerRadius);
+  const exposure = Number.isFinite(defenderExposure) ? Math.min(1, Math.max(0, defenderExposure)) : 1;
+  const blade = Math.max(0, finite(attackerRingStrike)) * Math.abs(finite(attackerOmega)) * Math.max(0, attackerRadius) * exposure;
   const e = 0.5 * Math.max(0, finite(reducedMass)) * v * (Math.max(0, p.impactScale) * v + Math.max(0, p.rotationalContribution) * blade);
   return Math.max(0, finite(e));
 }
@@ -319,8 +322,8 @@ export function applyContactDamage(
   pair.armed = false;
   pair.lastImpactStep = step;
 
-  const eA = strikeEnergy(r.vn, r.reducedMass, A.params.ringStrike, r.omegaA, A.params.radius, p);
-  const eB = strikeEnergy(r.vn, r.reducedMass, B.params.ringStrike, r.omegaB, B.params.radius, p);
+  const eA = strikeEnergy(r.vn, r.reducedMass, A.params.ringStrike, r.omegaA, A.params.radius, p, B.params.bladeExposure ?? 1);
+  const eB = strikeEnergy(r.vn, r.reducedMass, B.params.ringStrike, r.omegaB, B.params.radius, p, A.params.bladeExposure ?? 1);
   // A spun-out (toppled) top no longer strikes with its blades or attacks.
   const baseToB = A.spinning ? computeDamage(eA, A.combat.attack, B.combat.defense, p) : 0;
   const baseToA = B.spinning ? computeDamage(eB, B.combat.attack, A.combat.defense, p) : 0;

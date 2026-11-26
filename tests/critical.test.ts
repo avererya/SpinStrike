@@ -61,8 +61,14 @@ describe('critical hits', () => {
   });
 
   it('adds no impulse, knockback, energy or stamina drain: trajectories are identical with and without crits', () => {
-    const base = runAll(cfg(5, 0, 0));
-    const crit = runAll(cfg(5, 1, 1, 10));
+    // Health so large that even 10× crits never burst (health never feeds back into physics).
+    const tough = (c: ReturnType<typeof cfg>) => {
+      c.player.overrides.maxHealth = 1e6;
+      c.opponent.overrides.maxHealth = 1e6;
+      return c;
+    };
+    const base = runAll(tough(cfg(5, 0, 0)));
+    const crit = runAll(tough(cfg(5, 1, 1, 10)));
     expect(crit.states).toEqual(base.states);
     expect(crit.result.steps).toBe(base.result.steps);
     expect(crit.result.tops.map((t) => t.stamina)).toEqual(base.result.tops.map((t) => t.stamina));

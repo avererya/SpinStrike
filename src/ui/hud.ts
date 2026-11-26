@@ -149,7 +149,7 @@ export class Hud {
         const lost = o.kind === 'win' ? o.loser === i : o.kind === 'draw';
         out = lost && !(o.kind === 'draw' && snap.spinning);
         const elim = b.eliminated;
-        status = o.kind === 'win' && o.winner === i ? 'WINNER' : elim === 'burst' ? 'BURST' : elim === 'knockout' ? 'KNOCKED OUT' : !snap.spinning ? 'STOPPED' : o.kind === 'draw' ? 'DRAW' : '';
+        status = o.kind === 'win' && o.winner === i ? 'WINNER' : elim === 'burst' ? 'BURST' : elim === 'knockout' ? 'KNOCKED OUT' : o.kind === 'draw' ? 'DRAW' : !snap.spinning ? 'STOPPED' : '';
       } else {
         out = b.eliminated !== null || !b.spinning;
         status = b.eliminated === 'burst' ? 'BURST' : b.eliminated === 'knockout' ? 'KNOCKED OUT' : !b.spinning ? 'STOPPED' : hf < 0.25 ? 'CRITICAL' : '';

@@ -32,13 +32,13 @@ This document records the long-term vision and the design decisions made so far.
 
 | Top | Class | Identity | Health | Attack | Defense | Stamina | Speed | Weight |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Inferno | Attack | Red/black/silver, jagged ring. Fast and aggressive, hits hard, burns spin | 60 | 90 | 35 | 45 | 85 | 50 |
-| Titan | Defense | Blue/silver, thick armoured ring. Heavy, stable, settles in the centre | 90 | 40 | 95 | 65 | 30 | 95 |
-| Tempest | Stamina | Emerald/gold, smooth ring. Efficient with long endurance | 60 | 35 | 50 | 100 | 50 | 55 |
-| Phantom | Balance | Purple/silver/black, moderate winged ring. Well-rounded | 65 | 65 | 65 | 65 | 65 | 65 |
+| Inferno | Attack | Red/black/silver, jagged ring. Fast and aggressive, hits hard, burns spin | 63 | 95 | 35 | 62 | 85 | 50 |
+| Titan | Defense | Blue/silver, thick armoured ring. Heavy, stable, settles in the centre | 72 | 82 | 82 | 60 | 30 | 95 |
+| Tempest | Stamina | Emerald/gold, smooth ring. Efficient with long endurance | 69 | 40 | 65 | 85 | 50 | 55 |
+| Phantom | Balance | Purple/silver/black, moderate winged ring. Well-rounded | 69 | 72 | 65 | 67 | 65 | 65 |
 
 - Names, classes, visual identity and physical identity are **[Confirmed]**.
-- The stat values are **[Provisional]** relative design values (0–100), not physical units.
+- The stat values (v0.3 rebalance shown; v0.2 values are kept in `LEGACY_V02_STATS`) are **[Provisional]** relative design values (0–100), not physical units.
 - Part names (Rush Flat, Bastion Ball, Needle Point, Vector Semi-Flat; Blaze Fang, Aegis Wall, Zephyr Halo, Eclipse Wing; disc and core names) are **[Implementation assumption]**: original placeholder names.
 - All starter tops spin right (clockwise from above). **[Implementation assumption]**
 
@@ -167,3 +167,23 @@ New in v0.2. These need a design decision; see the balance report.
 5. **Stamina races are nearly deterministic** (seed variation changes spin-out times by only a few seconds). Should launch variance increase, or should the future launch-timing minigame supply this variation?
 6. **Opening-clash knockouts.** About 7 % of Inferno vs Tempest battles end in a knockout within the first second or two. Is that acceptable drama, or should launches start further from the rim?
 7. **Health scale** (×10 per stat point) and per-hit damage scale (typical hits 5–60 HP): do they read well? They are purely presentational relative to the formula.
+
+## v0.3 scope [Confirmed, delivered]
+
+Launch minigame, seeded AI launch quality, critical hits, spin-finish draw window, narrow victories, draw rematch, starter rebalance, version display and iOS mitigations. See the CHANGELOG.
+
+### Confirmed decisions (v0.3 spec)
+1. Launch quality multiplies rotational **energy** (Poor 1.00, Good 1.03, Great 1.07, Perfect 1.10), not ω. [Confirmed]
+2. Launch zones: Perfect 45–55 %, Great 30–70 %, Good 15–85 %. [Confirmed]
+3. AI launch distribution: Poor 15 %, Good 40 %, Great 35 %, Perfect 10 %, seeded. [Confirmed]
+4. Critical hits: 5 % base chance, 2× structural damage only, one roll per damaging impact per top. [Confirmed]
+5. Starter rebalance targets: Inferno vs Titan 35 %, Inferno vs Tempest 65 %, Titan vs Tempest 35 %, other pairs 50 %. No hidden class multipliers, forced winners, rubber-banding, matchup overrides or random stamina loss. [Confirmed]
+6. Inferno is a glass cannon; Titan loses its overlapping defense, stability and stamina advantages. [Confirmed]
+7. Draw window 0.25 s of simulation time; the defeated top cannot deal damage. [Confirmed]
+8. Narrow victory label at ≤ 2 % winner stamina (presentation only). [Confirmed]
+9. A draw offers a rematch with a new seed, fresh launch and new AI draw. [Confirmed]
+10. Mirror matches must show no P1/P2 bias. [Confirmed]
+
+**Implementation assumptions:** blade exposure on ring parts; stability from tips; stamina-based impact spin resistance; `V03_COLLISION` defaults; sweep 1.25 s and 8 s timeout.
+
+**Status after v0.3:** Titan vs Inferno/Tempest and the Phantom matchups are close to target; Inferno vs Tempest is ≈ 94 % (target 65 %). Draw rates in mirrors are high at 0.25 s (consider 0.1 s).

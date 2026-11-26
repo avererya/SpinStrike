@@ -63,6 +63,14 @@ export interface TopPhysicsParams {
    * cannot represent. The energy for the strike is taken from spin.
    */
   ringStrike: number;
+  /**
+   * 0–1: how much of an attacker's blade strike this top's ring surface
+   * exposes (v0.3). Smooth, rounded rings deflect blades (low), jagged or
+   * winged rings give blades something to catch (≈1). Scales the attacker's
+   * rotational (blade) damage term only; impulses are unaffected.
+   * Optional: undefined = 1 (v0.2 behaviour).
+   */
+  bladeExposure?: number;
   /** Scales how much rotational energy this top strips from an opponent on impact. */
   impactSpinDrain: number;
   /** 0–1 fraction of impact spin loss this top ignores. */

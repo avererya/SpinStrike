@@ -125,6 +125,17 @@ export function defaultLaunchConfig(): LaunchConfig {
   };
 }
 
+/**
+ * v0.3 collision defaults (Phase C tuning). The engine's DEFAULT_COLLISION
+ * keeps the v0.1/v0.2 values, which the legacy configuration and the
+ * physics unit tests use.
+ */
+export const V03_COLLISION = {
+  restitution: DEFAULT_COLLISION.restitution,
+  energyLoss: 0.59,
+  statSpinDrainWeight: 0.63,
+} as const;
+
 export const DEFAULT_DRAW_WINDOW = 0.25;
 export const DEFAULT_NARROW_THRESHOLD = 0.02;
 
@@ -140,11 +151,7 @@ export function defaultConfig(seed = 1): SandboxConfig {
       wallRestitution: DEFAULT_CLASSIC_BOWL.wallRestitution,
       rimLipHeight: DEFAULT_CLASSIC_BOWL.wallHeight,
     },
-    collision: {
-      restitution: DEFAULT_COLLISION.restitution,
-      energyLoss: DEFAULT_COLLISION.energyLoss,
-      statSpinDrainWeight: DEFAULT_COLLISION.statSpinDrainWeight,
-    },
+    collision: { ...V03_COLLISION },
     combat: defaultCombatConfig(),
     launch: defaultLaunchConfig(),
     results: { drawWindow: DEFAULT_DRAW_WINDOW, narrowThreshold: DEFAULT_NARROW_THRESHOLD },

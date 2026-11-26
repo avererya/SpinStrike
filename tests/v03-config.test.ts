@@ -4,6 +4,9 @@ import { validateConfig } from '../src/config/validate';
 import { runBatch } from '../src/sim/headless';
 import { renormalise } from '../src/ui/devPanel';
 import { LAUNCH_QUALITIES } from '../src/sim/launch';
+import { DEFAULT_COMBAT, strikeEnergy } from '../src/sim/combat';
+import { deriveTopPhysics } from '../src/content/derive';
+import { getTop } from '../src/content/tops';
 
 describe('v0.3 configuration', () => {
   it('migrates a v0.2 (version 2) file to the legacy ruleset, keeping all values, new mechanics off', () => {
@@ -119,5 +122,37 @@ describe('extreme and extended v0.3 simulations', () => {
         expect(r.tops[r.outcome.winner]!.spinning).toBe(true);
       }
     }
+  });
+});
+
+describe('v0.3 stat mapping and blade exposure', () => {
+  it('blade exposure scales only the blade term of the strike energy, is clamped, and defaults to 1', () => {
+    const p = { ...DEFAULT_COMBAT, impactScale: 0 };
+    const full = strikeEnergy(0.5, 0.02, 0.0176, 600, 0.025, p);
+    expect(strikeEnergy(0.5, 0.02, 0.0176, 600, 0.025, p, 0.37)).toBeCloseTo(full * 0.37, 12);
+    expect(strikeEnergy(0.5, 0.02, 0.0176, 600, 0.025, p, 5)).toBeCloseTo(full, 12);
+    expect(strikeEnergy(0.5, 0.02, 0.0176, 600, 0.025, p, -1)).toBe(0);
+    expect(strikeEnergy(0.5, 0.02, 0.0176, 600, 0.025, p, Number.NaN)).toBeCloseTo(full, 12);
+    // The translational term is unaffected.
+    const q = { ...DEFAULT_COMBAT, rotationalContribution: 0 };
+    expect(strikeEnergy(0.5, 0.02, 0.0176, 600, 0.025, q, 0.37)).toBe(strikeEnergy(0.5, 0.02, 0.0176, 600, 0.025, q));
+  });
+
+  it('defense no longer feeds stability or impact spin resistance; stamina and tips do', () => {
+    const tempest = getTop('tempest');
+    const base = deriveTopPhysics(tempest);
+    const def = deriveTopPhysics(tempest, { stats: { ...tempest.stats, defense: 100 } });
+    expect(def.stability).toBe(base.stability);
+    expect(def.impactSpinResist).toBe(base.impactSpinResist);
+    expect(def.restitution).toBeLessThan(base.restitution);
+    const sta = deriveTopPhysics(tempest, { stats: { ...tempest.stats, stamina: 100 } });
+    expect(sta.impactSpinResist).toBeGreaterThan(base.impactSpinResist);
+    expect(base.bladeExposure).toBe(0.37);
+    expect(deriveTopPhysics(getTop('inferno')).bladeExposure).toBe(1);
+    // The legacy ruleset keeps the v0.2 mapping (defense → stability).
+    const v2 = deriveTopPhysics(tempest, { ruleset: 'v0.2' });
+    const v2def = deriveTopPhysics(tempest, { ruleset: 'v0.2', stats: { ...tempest.stats, defense: 100 } });
+    expect(v2def.stability).toBeGreaterThan(v2.stability);
+    expect(v2.bladeExposure).toBeUndefined();
   });
 });

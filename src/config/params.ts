@@ -22,20 +22,20 @@ export const STADIUM_PARAMS = [
 
 export const COLLISION_PARAMS = [
   { key: 'restitution', label: 'Collision restitution', min: 0, max: 1, step: 0.01, unit: '', help: 'Global top–top bounciness (scaled per top by defense).' },
-  { key: 'energyLoss', label: 'Collision energy loss', min: 0, max: 3, step: 0.05, unit: '×', help: 'Extra spin energy removed per unit of impact energy.' },
-  { key: 'statSpinDrainWeight', label: 'Combat spin drain (stat weight)', min: 0, max: 1, step: 0.05, unit: '', help: 'How much attack/defense change impact spin loss (v0.1 = 1). Lowered in v0.2 because attack and defense now act through health damage.' },
+  { key: 'energyLoss', label: 'Collision energy loss', min: 0, max: 3, step: 0.01, unit: '×', help: 'Extra spin energy removed per unit of impact energy.' },
+  { key: 'statSpinDrainWeight', label: 'Combat spin drain (stat weight)', min: 0, max: 1, step: 0.01, unit: '', help: 'How much attack/defense change impact spin loss (v0.1 = 1). Lowered in v0.2 because attack and defense now act through health damage (v0.3 default 0.63).' },
 ] as const satisfies readonly ParamSpec[];
 
 export const COMBAT_PARAMS = [
   { key: 'damageScale', label: 'Global damage scale', min: 0, max: 200, step: 0.5, unit: 'HP', help: 'G: health points per unit of impact severity.' },
   { key: 'impactScale', label: 'Impact damage scale', min: 0, max: 5, step: 0.05, unit: '×', help: 'k_imp: weight of the translational impact term (½·μ·v′²).' },
-  { key: 'rotationalContribution', label: 'Rotational damage contribution', min: 0, max: 40, step: 0.5, unit: '×', help: 'k_rot: weight of the blade strike term (ring strike × ring surface speed).' },
+  { key: 'rotationalContribution', label: 'Rotational damage contribution', min: 0, max: 40, step: 0.1, unit: '×', help: 'k_rot: weight of the blade strike term (ring strike × ring surface speed).' },
   { key: 'defenseEffectiveness', label: 'Defense effectiveness', min: 0, max: 5, step: 0.05, unit: '×', help: 'e in K/(K + e·defense). Higher = defense reduces more (never to zero).' },
   { key: 'defenseReference', label: 'Defense half-value (K)', min: 1, max: 1000, step: 1, unit: '', help: 'Defense K/e halves incoming damage.' },
   { key: 'attackReference', label: 'Attack reference', min: 1, max: 200, step: 1, unit: '', help: 'Attack value that gives a 1× attack factor.' },
   { key: 'energyReference', label: 'Severity reference energy', min: 0.0001, max: 0.1, step: 0.0001, unit: 'J', help: 'Strike energy that counts as severity 1.' },
   { key: 'severityExponent', label: 'Severity exponent', min: 0.1, max: 2, step: 0.05, unit: '', help: 'p in x = (E/E_ref)^p. Below 1 compresses the gap between light and heavy hits.' },
-  { key: 'severityCap', label: 'Damage spike cap', min: 0.5, max: 100, step: 0.5, unit: '', help: 'Soft cap on severity: x/(1+x/cap). Limits damage from extreme impacts.' },
+  { key: 'severityCap', label: 'Damage spike cap', min: 0.5, max: 100, step: 0.05, unit: '', help: 'Soft cap on severity: x/(1+x/cap). Limits damage from extreme impacts.' },
   { key: 'minImpactSpeed', label: 'Minimum damaging impact speed', min: 0, max: 1, step: 0.01, unit: 'm/s', help: 'Approach speed below which contacts do no damage. Subtracted from the speed used in the formula.' },
   { key: 'rearmDistance', label: 'Contact re-arm separation', min: 0, max: 0.02, step: 0.0005, unit: 'm', help: 'Gap the rings must open before a new contact can damage again.' },
   { key: 'rearmTime', label: 'Contact re-arm time', min: 0, max: 1, step: 0.01, unit: 's', help: 'Within one sustained contact, a new hard approach can damage again after this time.' },

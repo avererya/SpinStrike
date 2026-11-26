@@ -2,6 +2,28 @@
 
 All notable changes to SpinStrike are documented here.
 
+## [0.3.0] — 2026-11-26 · Launch, Critical Hits & Combat Refinement
+
+### Added
+- **Launch minigame:** sweeping timing meter (≈1.25 s), Space/tap to launch, timeout = Poor. Zones Perfect 45–55 %, Great 30–70 %, Good 15–85 % (inclusive toward the better zone, configurable). Energy bonuses Poor 1.00, Good 1.03, Great 1.07, Perfect 1.10 multiply rotational energy (ω scales by the square root). Stamina is normalised to the energy actually launched. Quality and bonus are shown separately.
+- **Seeded AI launch quality** (Poor 15 / Good 40 / Great 35 / Perfect 10 %), event-keyed and frame-rate independent.
+- **Critical hits:** 5 % chance, 2× structural damage, one roll per damaging impact per top, event-keyed seeded RNG, no extra impulse or spin drain. Golden numbers, CRITICAL HIT label and stronger sparks (separate toggle). Crit statistics on the result card.
+- **Spin-finish draw window** (0.25 s of simulated time): a second stop within it is a near-simultaneous draw; a defeated top cannot deal damage or cause a knockout. **Narrow victory** label at ≤ 2 % winner stamina. Accurate decisive-moment snapshots; the winner is never shown STOPPED. **Rematch** after a draw uses a new seed, a fresh launch and a new AI draw.
+- **Rulesets:** v0.3 (default) and v0.2 legacy; `legacyV02Config()` reproduces v0.2 exactly (regression-tested on 32 recorded battles).
+- **Blade exposure** ring property (Zephyr Halo 0.37).
+- **Version display** (`v0.3.0 · commit`), `version.json`, Cloudflare `_headers` (no-cache HTML, immutable hashed assets) and a non-reloading "newer version" notice.
+- **Developer panel:** launch, critical-hit, result and ruleset controls, "Load legacy v0.2 configuration". Config format v3; v1/v2 files migrate to the legacy ruleset.
+- **Headless simulator:** `--legacy`, `--launch`, `--crits`, duration and early-finish statistics, crit statistics, draw reasons, mirror fairness with z scores. `scripts/tune-eval.ts` for balance sweeps.
+
+### Changed
+- **Stat → physics mapping:** defense no longer feeds stability or impact spin resistance; stability comes from the tip (+ weight); stamina now provides impact spin resistance.
+- **Starter rebalance** (stats, tip stability and pivot friction, Blaze Fang strike, damage constants). See `docs/balance/BALANCE_REPORT.md`.
+- iOS: toolbar-coloured page background, safe-area padding inside the toolbar, HUD backdrop blur removed (mitigation, unverified on device).
+
+### Known issues
+- Inferno vs Tempest ≈ 94 % (target 65 %). iOS blur and deployment unverified. See README.
+
+
 ## [0.2.0] — 2026-11-25 · Combat & Finishes
 
 ### Added
