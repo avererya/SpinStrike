@@ -136,7 +136,7 @@ export const V03_COLLISION = {
   statSpinDrainWeight: 0.63,
 } as const;
 
-export const DEFAULT_DRAW_WINDOW = 0.25;
+export const DEFAULT_DRAW_WINDOW = 0.1;
 export const DEFAULT_NARROW_THRESHOLD = 0.02;
 
 export function defaultConfig(seed = 1): SandboxConfig {

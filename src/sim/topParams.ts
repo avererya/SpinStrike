@@ -71,6 +71,18 @@ export interface TopPhysicsParams {
    * Optional: undefined = 1 (v0.2 behaviour).
    */
   bladeExposure?: number;
+  /**
+   * ≥ 0 (v0.3.1): multiplier on the rotational energy this top loses in
+   * impacts. A deflective ring that glances hits scrubs spin on the sliding
+   * contact (>1), the price of its structural protection. Optional: undefined = 1.
+   */
+  impactSpinLossFactor?: number;
+  /**
+   * >0 (v0.3.1): scales the severity ceiling of hits TAKEN by this top.
+   * A rounded, energy-absorbing ring flattens the worst impacts (low) while
+   * barely changing glancing or moderate ones. Optional: undefined = 1.
+   */
+  damageCapFactor?: number;
   /** Scales how much rotational energy this top strips from an opponent on impact. */
   impactSpinDrain: number;
   /** 0–1 fraction of impact spin loss this top ignores. */

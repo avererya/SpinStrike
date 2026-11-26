@@ -1,3 +1,55 @@
+# SpinStrike v0.3.1 balance report (Classic Bowl)
+
+Method: `npm run sim -- --seed 1` and `--seed 100001` (16 ordered matchups × 500 seeds = 8,000 battles per set, **16,000 total**, distributed launches, crits on, 0 failures, 0 timeouts). Raw reports: [`v0.3.1/`](v0.3.1/). The v0.3 code was re-run on the same seeds with the same 0.10 s window (`baseline-v0.3-window0.1-*`) so the comparison isolates the Tempest change. Candidates were found by sweeping in memory with `scripts/tune-eval.ts` on seeds 500001+ (150–400 seeds), separate from the validation sets.
+
+## Changed parameters and rationale
+| Parameter | v0.3 | v0.3.1 | Why |
+| --- | --- | --- | --- |
+| Draw window | 0.25 s | **0.10 s** | Playtest: fewer mirror draws. |
+| Zephyr Halo `damageCapFactor` (new, default 1) | n/a | **0.45** | Rounded ring flattens the hardest hits taken (Inferno's bursts) and leaves moderate hits almost unchanged. Applies to every attacker. |
+| Zephyr Halo `impactSpinLossFactor` (new, default 1) | n/a | **1.5** | Cost of deflection: sliding contact scrubs 50 % more spin on impact. |
+| Tempest health | 69 | **63** | Compensation (see below). |
+| Tempest stamina | 85 | **75** | Compensation. |
+| Mobile top spacing | 0 effective (padding reset on ≤ 760 px) | safe area + 20 px (16 px landscape), iOS touch only | Move UI below the blurred band. |
+
+Everything else (Inferno, Titan, Phantom, launch, crits, movement, collisions) is unchanged.
+
+**What was tried.** A plain damage-fraction (`damageExposure`) on the ring, a lower blade exposure, and a spin-loss factor alone all failed: any protection strong enough to take Inferno vs Tempest from 94 % to ~70 % also made Tempest nearly unkillable for Titan and Phantom (Titan vs Tempest 2–10 %, Phantom 4–18 %), because the three matchups are all decided by who bursts first. Capping the severity of the hardest hits helped more selectively, but Titan vs Tempest still fell to ~15–20 %, so Tempest's health and stamina were lowered to bring Titan and Phantom back. `damageExposure` was dropped as unused. The honest tradeoff is that Tempest is a tougher ring on a lower-stamina, lower-health body.
+
+## Results (slot-averaged win % of row vs column)
+| Seeds 1–500 | Inferno | Titan | Tempest | Phantom |
+| --- | --- | --- | --- | --- |
+| Inferno | 46.7 | 32.6 | **71.3** | 43.2 |
+| Titan | 67.0 | 47.2 | 31.2 | 45.1 |
+| Tempest | 28.6 | 68.8 | 49.3 | 49.6 |
+| Phantom | 55.9 | 49.0 | 50.3 | 46.1 |
+
+| Seeds 100001–100500 | Inferno | Titan | Tempest | Phantom |
+| --- | --- | --- | --- | --- |
+| Inferno | 46.7 | 31.5 | **69.2** | 39.5 |
+| Titan | 67.9 | 47.0 | 29.5 | 46.6 |
+| Tempest | 30.8 | 70.5 | 49.5 | 51.9 |
+| Phantom | 59.6 | 47.3 | 47.5 | 46.4 |
+
+Comparison with v0.3 on the same seeds and window (seeds 1 / 100001): Inferno vs Tempest 94.9 / 93.9 → 71.3 / 69.2; Titan vs Tempest 26.2 / 24.0 → 31.2 / 29.5 (target 35); Phantom vs Tempest 42.3 / 40.8 → 50.3 / 47.5; Inferno vs Titan 32.6 / 31.5 unchanged; Phantom vs Inferno/Titan unchanged within noise.
+
+Overall non-mirror win rates (seeds 1 / 100001), v0.3 → v0.3.1: Inferno 55.6 / 53.9 → 49.0 / 46.7, Titan 46.1 / 46.2 → 47.8 / 48.0, Tempest 45.4 / 47.0 → 49.0 / 51.1, Phantom 49.1 / 49.2 → 51.7 / 51.5. All four are inside 45–55 %. (Inferno's overall rate falls because it no longer wins ~95 % against Tempest; its Titan and Phantom results are unchanged.)
+
+**Finish distribution (all battles, seeds 1 / 100001):** burst 28.9 / 27.7 % (v0.3: 30.3 / 29.3), knockout 2.9 / 2.9 %, spin 65.9 / 67.1 %. **Durations:** mean 40.1 / 40.2 s, median 41.9 s (v0.3 40.7 / 42.5), P10–P90 25.6–54.5 s. Inferno vs Tempest median ~21.7 s (v0.3 ~17 s) with 18.2 % under 2 s, ~19 % under 10 s: unchanged opening-clash bursts and knockouts. Titan vs Tempest mean 40 s, Tempest vs Phantom 45 s. Early finishes overall < 2 s 2.3 %, < 5 s 2.7 %, < 10 s 2.9 %.
+
+**Draws:** 2.3 % overall in both sets (v0.3 at 0.25 s: 4.9 %); mirrors: Inferno 6.6 %, Titan 5.6–6.0 %, Tempest 1.0–1.4 %, Phantom 7.2–7.8 % (v0.3: 14–19 %). Non-mirror draws 1.2–1.4 %.
+
+**Mirror fairness (P1 share of decisive results, z vs 50 %):** seeds 1: Inferno 51.0 % (0.42), Titan 50.2 % (0.09), Tempest 50.1 % (0.05), Phantom 52.1 % (0.88); seeds 100001: 51.0 % (0.42), 52.6 % (1.11), 52.7 % (1.21), 52.4 % (1.02). No slot bias (|z| ≤ 1.3). A unit test checks Titan and Tempest mirrors too.
+
+## Remaining issues
+1. Inferno vs Tempest is 69–71 % (target 65 %; 70–75 % accepted). Two seed sets straddle 70 %.
+2. Titan vs Tempest is 30–31 % (target 35 %). The two Tempest matchups move together, so pushing one to target pulls the other away.
+3. Tempest has less raw stamina and health than in v0.3; its identity now relies on its tip and ring. Tempest vs Phantom is ~50 %, Tempest mirrors are still 0-damage spin races.
+4. Inferno vs Tempest still has ~18 % of battles ending in under 2 s (opening-clash burst/knockout). Not changed, since launch and collision behaviour were to be preserved.
+5. iOS blur is not verified on a physical iPhone; the layout was checked only in headless Chromium.
+
+---
+
 # SpinStrike v0.3 balance report (Classic Bowl)
 
 All numbers come from `npm run sim` (headless). Win rates are shares of **all** battles; draws and timeouts are neither wins nor losses. "Slot-averaged" combines both slot orders. Raw reports: [`v0.3/`](v0.3/). The v0.2 report follows below, unchanged.

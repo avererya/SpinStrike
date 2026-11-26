@@ -280,10 +280,12 @@ export function computeDamage(
   attackerAttack: number,
   defenderDefense: number,
   p: CombatParams,
+  defenderCapFactor = 1,
 ): number {
   const eRef = Math.max(1e-12, finite(p.energyReference));
   const ratio = Math.max(0, finite(energy)) / eRef;
-  const sev = softCap(Math.pow(ratio, clampExp(p.severityExponent)), p.severityCap);
+  const capScale = Number.isFinite(defenderCapFactor) && defenderCapFactor > 0 ? defenderCapFactor : 1;
+  const sev = softCap(Math.pow(ratio, clampExp(p.severityExponent)), p.severityCap * capScale);
   const d = Math.max(0, finite(p.damageScale)) * attackFactor(attackerAttack, p) * defenseFactor(defenderDefense, p) * sev;
   return Math.max(0, finite(d));
 }
@@ -325,8 +327,9 @@ export function applyContactDamage(
   const eA = strikeEnergy(r.vn, r.reducedMass, A.params.ringStrike, r.omegaA, A.params.radius, p, B.params.bladeExposure ?? 1);
   const eB = strikeEnergy(r.vn, r.reducedMass, B.params.ringStrike, r.omegaB, B.params.radius, p, A.params.bladeExposure ?? 1);
   // A spun-out (toppled) top no longer strikes with its blades or attacks.
-  const baseToB = A.spinning ? computeDamage(eA, A.combat.attack, B.combat.defense, p) : 0;
-  const baseToA = B.spinning ? computeDamage(eB, B.combat.attack, A.combat.defense, p) : 0;
+  // damageCapFactor (v0.3.1) is a ring-profile property of the DEFENDER, applied to every attacker alike.
+  const baseToB = A.spinning ? computeDamage(eA, A.combat.attack, B.combat.defense, p, B.params.damageCapFactor) : 0;
+  const baseToA = B.spinning ? computeDamage(eB, B.combat.attack, A.combat.defense, p, A.params.damageCapFactor) : 0;
   if (baseToA <= 0 && baseToB <= 0) return false;
 
   // Critical hits (v0.3): rolled once per legitimate damaging impact, per
