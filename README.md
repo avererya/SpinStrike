@@ -1,9 +1,10 @@
-# SpinStrike — v0.4.1 Combat Dynamics & Progression Refinement
+# SpinStrike — v0.5.0 Tactical Combat & Intelligent AI
 
 SpinStrike is a browser-based, physics-driven spinning-top combat game. Tops, names and art are all original.
 **v0.4 turns the combat sandbox into a persistent progression game**: choose a starter top, battle random Bronze
 opponents in Quick Battle, earn Credits and XP, level up, buy permanent upgrades, and climb the career ranks.
-v0.4.1 refines the combat dynamics and adds launch aiming (below); the
+v0.4.1 refined the combat dynamics and added launch aiming. **v0.5 adds tactical combat**: a Directional Boost and a
+Defensive Brace for both sides, and a tactical AI whose skill follows the difficulty (below). The
 original sandbox is kept as a separate developer mode that never touches your career.
 
 See [Progression and economy](docs/PROGRESSION.md), [Save schema](docs/SAVE_SCHEMA.md) and
@@ -17,6 +18,31 @@ Live: https://spinstrike.pages.dev/ (Cloudflare Pages, deployed from `main`).
 - **Physics is independent of rendering.** `src/sim` has no Three.js or DOM imports, so it runs the same in the browser, in tests and in the headless simulator.
 
 ---
+
+## v0.5: tactical combat and intelligent AI
+
+Full report: [`docs/TACTICAL_COMBAT_v0.5.md`](docs/TACTICAL_COMBAT_v0.5.md).
+
+- **Boost (3 per battle).** Press anywhere in the stadium, drag the way you want to go, and release.
+  - An arrow from your top shows strength (33–100 %, set by drag length) and stamina cost (1–3 % of launch spin).
+  - It is a real impulse: heavier tops move less, and it never creates energy. 3 s cooldown.
+  - Short drags cancel and cost nothing.
+  - Desktop: mouse drag, or hold the arrow keys and release them.
+- **Brace (2 per battle).** Tap the big Brace button (or B / Shift) just before a hit.
+  - For 1.5 s you take 30 % less damage and 25 % less knockback. No stamina cost.
+  - 5 s cooldown from activation. Brace can be used together with Boost.
+- **Fair opponent.** The AI has the same charges, costs and rules, and sees only what a player could see.
+  - Each class plays differently: Inferno attacks, Titan braces and counters, Tempest conserves and evades, Phantom adapts.
+  - Difficulty changes how *well* the AI plays (reaction, prediction, timing, charge planning, launch aim), never its stats.
+- **Stats.**
+  - Per-top lifetime tactical statistics in History.
+  - Battle records with both sides' ability use.
+  - Saves migrate automatically (schema 2).
+- **Speed upgrades now help** (ruleset v0.5): upgraded Speed tightens the top's driven path and adds launch speed and Boost authority.
+- **Sandbox.**
+  - Tactics on/off, player / AI / passive per slot, difficulty per slot, every ability parameter, AI vs AI, and scripted command sequences.
+  - "Replay (same seed)" reproduces battles with abilities exactly.
+- **Scripts:** `npm run tactics`, `npm run speed`, `npm run full-builds`, `npm run economy:v05`, `npm run tactics:learn`.
 
 ## v0.4.1: combat dynamics, launch aiming, refined progression
 
@@ -306,6 +332,11 @@ Gameplay stats (0–100) are not physical units. `src/content/derive.ts` maps th
 - **Anti-overlap.** Positional correction is split by inverse mass with a small slop. Contact hysteresis means a continuous contact counts as one collision.
 - **Walls.** The wall uses its own restitution and a small friction against the spinning ring, and wall impacts cost some spin.
 
+### Tactical abilities (v0.5)
+- **Boost.** An impulse `J = strength × 0.06 N·s × boostPower` along the requested floor direction (`Δv = J/m`). It is paid with `cost = (1–3 %) × launch energy` taken from spin, and the kinetic-energy gain is capped at 90 % of the cost (`tactics.ts`, `applyBoost`).
+- **Brace.** Damage after criticals and caps × 0.7 (`combat.ts`). Top–top normal and strike impulses × 0.75, never below the inelastic minimum, so momentum is conserved and no energy is added (`collision.ts`).
+- **Validation and replay.** Commands are validated on the tick they apply (`World.applyCommand`), and the accepted-command log is a complete replay.
+
 ## Combat model
 
 v0.2 introduced health, damage and the three finishes. v0.3 keeps that model and adds launch quality, critical hits, blade exposure, the draw window and a cleaner stat → physics mapping. Two rulesets exist (`src/content/derive.ts`): **v0.3** (default) and **v0.2 legacy**, which keeps the v0.2 stats and mapping unchanged for regression runs and migrated configurations.
@@ -456,6 +487,13 @@ Damaging hits add sparks and an impact ring scaled to damage ÷ max health. Ordi
 
 ---
 
+## Tactical balance (v0.5)
+
+Report: [`docs/TACTICAL_COMBAT_v0.5.md`](docs/TACTICAL_COMBAT_v0.5.md). Raw runs: [`docs/balance/v0.5/`](docs/balance/v0.5/). Passive combat (abilities off or unused) is identical to v0.4.1: the table below still applies. Across 32,256 tactical battles:
+- Against a passive opponent, Easy wins 45.2 %, Normal 49.7 %, Hard 50.8 % and Expert 53.7 %.
+- Expert beats Easy 58.4 %.
+- Knockouts rise to 13–21 % at Hard and Expert.
+
 ## Balance (v0.4.1, Classic Bowl)
 
 Report: [`docs/COMBAT_DYNAMICS_v0.4.1.md`](docs/COMBAT_DYNAMICS_v0.4.1.md). Raw runs: [`docs/balance/v0.4.1/`](docs/balance/v0.4.1/). The v0.3.1 report is kept in [`docs/balance/BALANCE_REPORT.md`](docs/balance/BALANCE_REPORT.md).
@@ -473,7 +511,13 @@ Draws are 2.4 %. Finishes are 34 % burst, 4 % knockout and 60 % spin. The median
 
 ## Known limitations
 
-- **v0.4.1 open items:**
+- **v0.5 open items:**
+  - The Titan mirror is still slow (≈ 58 s, half the battles have no hit by 20 s). Skilled AIs rightly avoid boosting there.
+  - Fully upgraded Titan wins 62 % against other full builds and Tempest 36 %. A roster-average upgrade basis (implemented, off) narrows this to 41–58 % and awaits approval.
+  - Tempest is the strongest ability user (55–58 % in AI mirrors).
+  - Landscape phones show a small stadium.
+  - Tactical controls were checked in an emulated iPhone 13 and in desktop Chromium only, not on a physical iPhone or the live deployment.
+- **v0.4.1 open items (Speed and AI aim are addressed in v0.5):**
   - Speed upgrades are slightly negative (about −3 to −5 points at rank 10).
   - Phantom beats Inferno about 60 % and loses to Titan about 61 %.
   - The Inferno mirror is short (about 6.5 hits).

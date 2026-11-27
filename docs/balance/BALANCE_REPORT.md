@@ -1,5 +1,18 @@
 > **v0.4.1:** current balance, stats and entertainment metrics are in [`../COMBAT_DYNAMICS_v0.4.1.md`](../COMBAT_DYNAMICS_v0.4.1.md), with raw runs in [`v0.4.1/`](v0.4.1/). The sections below describe v0.3.1 and are kept for history; v0.3.1 balance is reproducible in the sandbox with "Load v0.4.0 baseline".
 
+# SpinStrike v0.5.0 balance summary
+
+Full report: [`docs/TACTICAL_COMBAT_v0.5.md`](../TACTICAL_COMBAT_v0.5.md). Raw runs: [`v0.5/`](v0.5/).
+
+- **Passive regression.** 32,000 battles (seeds 100001–102000) under ruleset v0.5 are identical to the v0.4.1 report in every metric ([`v0.5/passive-regression-seeds-100001-102000.md`](v0.5/passive-regression-seeds-100001-102000.md)). Counters stay at Inferno > Tempest 70.0 %, Tempest > Titan 71.3 % and Titan > Phantom 58.7 %.
+- **Tactical.** 32,256 battles across 12 difficulty pairings ([`v0.5/tactical-sim-seeds-900001-900084.md`](v0.5/tactical-sim-seeds-900001-900084.md)).
+  - Against a passive opponent: Easy 45.2 %, Normal 49.7 %, Hard 50.8 %, Expert 53.7 %.
+  - Mirrors 50.0 %. Draws ≤ 2.1 %. No hit by 20 s 2.0–4.3 %.
+- **Speed upgrades** ([`v0.5/speed-ranks.md`](v0.5/speed-ranks.md)). Rank 10 in passive combat: Inferno +7.3, Titan −0.3, Tempest +1.0, Phantom +5.5 points (v0.4.1: −2.6 / −1.8 / +0.2 / −5.5).
+- **Full builds** ([`v0.5/full-builds-percent.md`](v0.5/full-builds-percent.md), [`v0.5/full-builds-reference.md`](v0.5/full-builds-reference.md)).
+  - Titan 62 %, Tempest 36 % (current rule).
+  - With the roster-average bonus basis (off, needs approval): 41–58 %.
+
 # SpinStrike v0.3.1 balance report (Classic Bowl)
 
 Method: `npm run sim -- --seed 1` and `--seed 100001` (16 ordered matchups × 500 seeds = 8,000 battles per set, **16,000 total**, distributed launches, crits on, 0 failures, 0 timeouts). Raw reports: [`v0.3.1/`](v0.3.1/). The v0.3 code was re-run on the same seeds with the same 0.10 s window (`baseline-v0.3-window0.1-*`) so the comparison isolates the Tempest change. Candidates were found by sweeping in memory with `scripts/tune-eval.ts` on seeds 500001+ (150–400 seeds), separate from the validation sets.

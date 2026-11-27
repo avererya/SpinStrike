@@ -1,4 +1,4 @@
-# Career save schema (v0.4 / v0.4.1, schemaVersion 1)
+# Career save schema (v0.5, schemaVersion 2)
 
 Code: `src/career/save.ts` (types, validation, migration), `src/career/store.ts` (persistence), `src/career/history.ts` (statistics).
 
@@ -13,7 +13,7 @@ The game version never resets a career.
 ## Shape
 ```
 CareerSave {
-  format: 'spinstrike-career', schemaVersion: 1,
+  format: 'spinstrike-career', schemaVersion: 2,
   careerId, createdAt, updatedAt, createdWithVersion, revision,
   credits, rank { id, wins, championshipQualified },
   totals { battles, wins, creditsEarned, xpEarned },
@@ -25,10 +25,16 @@ OwnedTop { instanceId, definitionId, rarity, acquiredAt, level, xp, lifetimeXp,
   launchAim? { direction: -45..45, tilt: 0..30 } (v0.4.1, optional) }
 TopStats { battles, wins, losses, draws, streak, bestStreak, winsByFinish, lossesByFinish,
   fastestWin, longestBattle, damageDealt, damageReceived, critsLanded, creditsEarned, xpEarned,
-  launches{poor..perfect}, vsClass{}, vsTop{}, byStadium{} (Tally each), recent: BattleRecord[<=100] }
+  launches{poor..perfect}, vsClass{}, vsTop{}, byStadium{} (Tally each), tactics: TacticalLifetime (v0.5),
+  recent: BattleRecord[<=100] }
+TacticalLifetime { battles, boostsUsed, bracesUsed, staminaSpent (sum of % of launch energy), braceImpacts,
+  damagePrevented, boostsToHit, boostKnockouts, noAbilityBattles, noAbilityWins }
 BattleRecord { id, at, seed, stadiumId, difficulty, playerRankId, opponent{topId,topClass,rankId,ranks},
   result, finish, duration, launch, opponentLaunch, damageDealt, damageReceived, crits, rewards{credits,xp},
-  ruleset? (v0.4.1+), aim? {direction,tilt} (v0.4.1+), opponentAim? {direction,tilt} (v0.4.1+) }
+  ruleset? (v0.4.1+), aim? {direction,tilt} (v0.4.1+), opponentAim? {direction,tilt} (v0.4.1+),
+  tactical? { player: TacticalSide, opponent: TacticalSide } (v0.5+),
+  launchSettings? { opponentAimDirection: [min,max], opponentAimTilt: [min,max] } (v0.5+) }
+TacticalSide { boosts, braces, boostsLeft, bracesLeft, staminaSpent, braceImpacts, damagePrevented, boostsToHit, boostKnockout }
 ```
 Instance ids (`top_*`, `battle_*`) are unique; definition ids (`inferno`) reference content. New tops, stadiums and equipment add keys, not schema changes.
 
@@ -48,3 +54,17 @@ Every change (`startCareer`, `upgrade`, `settleBattle`, `importJson`) builds a c
 
 ## Export / import
 Settings exports `{format:'spinstrike-career-export', exportVersion:1, exportedAt, gameVersion, save}` as JSON (download or clipboard). Import validates (and migrates) first, shows a summary, and replaces the career only after explicit confirmation. Reset requires typing RESET.
+
+## v0.5 (schema 2)
+- **Migration 1 → 2** (`MIGRATIONS[1]` in `src/career/save.ts`): every owned top gets `stats.tactics` with all counters at zero. Nothing else changes.
+- **No back-filling:**
+  - Existing battle records are kept byte-for-byte and get no `tactical` or `launchSettings`.
+  - Lifetime tactical statistics count only battles played with abilities, so `tactics.battles` can be lower than `battles`.
+- **New records:**
+  - Records of battles played with abilities carry `ruleset: 'v0.5.0'` (otherwise the physics ruleset).
+  - They also carry `tactical` (per side: usage, remaining charges, stamina spent, braced impacts, damage prevented, boost→hit, boost→KO) and the opponent's aim range (`launchSettings`).
+- **Attribution windows** (simulation time):
+  - boost→hit is a damaging hit between the two tops within 1.0 s of a boost;
+  - boost→KO is the opponent knocked out within 1.5 s of the player's last boost, with a damaging hit in between.
+- **Loading old saves:** a schema-1 save (v0.4.0 or v0.4.1) migrates automatically on load and on import. A schema-2 save opened by an older build is refused as "newer" and is never overwritten.
+- **Separation:** sandbox battles never write career statistics.

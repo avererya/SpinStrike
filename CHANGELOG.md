@@ -2,6 +2,66 @@
 
 All notable changes to SpinStrike are documented here.
 
+## [0.5.0] — 2026-11-27 · Tactical Combat & Intelligent AI
+
+Full report: [`docs/TACTICAL_COMBAT_v0.5.md`](docs/TACTICAL_COMBAT_v0.5.md).
+
+### Added
+- **Directional Boost.** Aim-and-release anywhere in the stadium: drag, see an arrow from your top with strength and cost, release.
+  - 3 charges, 3 s cooldown, 33–100 % strength set by drag length (normalised to the stadium size), costing 1–3 % of launch spin.
+  - A physical impulse (Δv = J/m) that adds to velocity and never creates energy (kinetic gain ≤ 90 % of the paid spin energy). No auto-targeting. Speed sets boost authority (its only effect on Boost).
+  - Cancelled or invalid gestures consume nothing. Every request is validated again on release.
+- **Defensive Brace.** 2 charges, 1.5 s active, 5 s cooldown from activation, −30 % damage (ordinary and critical), −25 % knockback (momentum conserved), no stamina cost. Runs on simulation time. No stacking, no heal, no invulnerability. Usable together with Boost.
+- **Interface.**
+  - Mobile-first Boost / Brace bar with charges, cooldown, unavailable reason and hints. The bar sits below the stadium in portrait and in the corners in landscape.
+  - The opponent's charges and a BRACED tag on the HUD.
+  - Cosmetic effects: boost trail, blue Brace shield, impact pulse.
+  - Short tutorial, shown once and reopenable from "?" (which pauses the battle).
+  - Desktop: mouse drag, B / Shift for Brace, arrow keys to aim a boost, Escape to cancel.
+  - Gestures are cancelled on multi-touch, `pointercancel`, pause, backgrounding (which also auto-pauses), blur, resize and orientation change.
+  - The result card has a Tactics section.
+- **Tactical AI** (`src/ai/`).
+  - Observes only legitimate state (`sim/observation.ts`) and predicts over a short horizon only.
+  - Scores Brace, evasion, centre recovery, interception, knockout, orbit break, counter-attack and Brace-then-Boost combos, with rim safety and charge budgeting.
+  - Reusable personalities: Striker (Inferno), Bulwark (Titan), Endurer (Tempest), Tactician (Phantom).
+  - Learned per-matchup tactic values (`MATCHUP_KNOWLEDGE`, `npm run tactics:learn`).
+- **Difficulty** sets the AI's decision rate, reaction, prediction error, look-ahead, mistakes, Brace timing, charge planning, matchup knowledge, launch quality and launch aim. It never changes stats or charges.
+- **Career.**
+  - Abilities are on in Quick Battles.
+  - Records carry per-side tactical usage, remaining charges, the opponent's aim range and `ruleset: 'v0.5.0'`.
+  - New lifetime tactical statistics per top: boosts, braces, stamina spent, braced impacts, damage prevented, boost→hit (1 s), boost→KO (1.5 s), and battles / wins without abilities.
+  - Shown in History. Not back-filled for older battles.
+- **Save schema 2**, with a migration from schema 1 (v0.4.0 / v0.4.1 saves). Export, import and reset are covered by tests.
+- **Sandbox.**
+  - Sandbox configuration version 5. Version 4 files import with abilities off.
+  - Tactics on/off, per-slot controller (player / AI / passive), per-slot difficulty, every Boost and Brace parameter, an AI vs AI shortcut, and scripted command sequences (`tactical.script`).
+  - "Replay (same seed)" re-applies your recorded commands exactly.
+- **Determinism.**
+  - Command-based abilities `{tick, slot, ability, dir, strength}`.
+  - The accepted-command log replays a battle bit-exactly without the AI.
+  - Independent RNG streams for AI tactics and AI aim.
+- **Scripts.** `npm run tactics` (tactical pair simulations), `npm run speed`, `npm run full-builds`, `npm run economy:v05` and `npm run tactics:learn`.
+- `tests/tactics.test.ts` adds 33 tests.
+
+### Changed
+- **Ruleset `v0.5` (default).** Speed *above a top's base rating* (upgrades) now tightens the tip drive and leaves traction at the base value, instead of widening both. Rank-10 Speed in passive combat: Inferno +7.3, Phantom +5.5, Tempest +1.0, Titan −0.3 points (v0.4.1: −5.5 to +0.2). Unupgraded tops are identical to v0.4.1.
+- Difficulty descriptions now mention tactics and aim. `Difficulty` moved to `src/ai/difficulty.ts`, re-exported from the career config.
+- Version 0.5.0.
+
+### Results
+- **Passive regression:** 32,000 battles (seeds 100001–102000) are identical to the v0.4.1 report in every metric.
+- **Tactical:** 32,256 battles across 12 difficulty pairings. Easy 45.2 / Normal 49.7 / Hard 50.8 / Expert 53.7 % against a passive opponent. Normal beats Easy 54.7 %, Hard beats Normal 51.3 %, Expert beats Hard 51.9 % and Expert beats Easy 58.4 %.
+
+### Unchanged (pending approval)
+- The temporary reward multipliers stay at 0.75 / 1.0 / 1.1 / 1.2, because Credits/hour is roughly flat from Normal to Expert.
+- The +25 % Speed maximum is unchanged.
+- The upgrade bonus basis stays "% of own base". The alternative "% of roster average" is implemented but off.
+
+### Known issues
+- The Titan mirror is still slow (≈ 58 s; 51 % of battles have no hit by 20 s), because skilled AIs correctly avoid costly boosts there.
+- Fully upgraded Titan still wins 62 % against other full builds and Tempest 36 %.
+- Landscape phones show a small stadium; the HUD layout is unchanged from v0.4.1.
+
 ## [0.4.1] — 2026-11-26 · Combat Dynamics & Progression Refinement
 
 Full report: [`docs/COMBAT_DYNAMICS_v0.4.1.md`](docs/COMBAT_DYNAMICS_v0.4.1.md).

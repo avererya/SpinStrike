@@ -20,10 +20,16 @@ import type { GameplayStats } from './stats';
  * Every constant below is a PROVISIONAL tuning value, not a confirmed
  * design decision. See README "Stat → physics mapping" for the table.
  */
-export type Ruleset = 'v0.2' | 'v0.3' | 'v0.4.1';
+export type Ruleset = 'v0.2' | 'v0.3' | 'v0.4.1' | 'v0.5';
 /** 'v0.3' = the v0.3.1 – v0.4.0 stats and mapping (v0.4.0 baseline path). */
-export const RULESETS: readonly Ruleset[] = ['v0.4.1', 'v0.3', 'v0.2'];
-export const DEFAULT_RULESET: Ruleset = 'v0.4.1';
+/**
+ * 'v0.5' = v0.4.1 stats and mapping, except that Speed ABOVE OR BELOW a top's
+ * base rating (upgrades) tightens the tip drive instead of widening it and
+ * leaves traction at the base value. Identical to 'v0.4.1' for every
+ * unupgraded top.
+ */
+export const RULESETS: readonly Ruleset[] = ['v0.5', 'v0.4.1', 'v0.3', 'v0.2'];
+export const DEFAULT_RULESET: Ruleset = 'v0.5';
 /** Physics / combat ruleset id recorded in v0.4.1+ battle history. */
 export const PHYSICS_VERSION = 'v0.4.1';
 
@@ -212,24 +218,36 @@ export const PARAMS_V041 = {
    * continues to the mapping ceiling). Speed's only effect on Boost.
    */
   boostPower: [0.5, 1.5] as const,
+  /**
+   * v0.5 ruleset: tip drive radius change per unit of UPGRADE speed (stat
+   * points above the base rating / 100). Negative = a tighter drive. The
+   * v0.4.1 mapping widened the drive and raised traction with Speed, which
+   * made the top run a wider, more spin-wasting orbit (rank 10 cost 4–6
+   * win points). Measured in docs/TACTICAL_COMBAT_v0.5.md.
+   */
+  speedUpgradeDrive: -0.3,
 };
 
-function derivePhysicsV041(s: GameplayStats, p: ResolvedParts, spinDirection: 1 | -1): TopPhysicsParams {
+function derivePhysicsV041(s: GameplayStats, p: ResolvedParts, spinDirection: 1 | -1, baseSpeed: number | null = null): TopPhysicsParams {
   const { ring, disc, tip } = p;
   const P = PARAMS_V041;
   const tv = tip.v041;
   const rv = ring.v041 ?? {};
   const tipStability = tv?.stability ?? tip.stability ?? 0.5;
   const stability = Math.min(0.95, Math.max(0.05, tipStability + lerp(P.stabilityWeight[0], P.stabilityWeight[1], tUp(s.weight))));
+  // v0.5 ruleset (baseSpeed given): drive and traction follow the BASE speed
+  // rating; upgrade speed tightens the drive. v0.4.1: both follow the stat.
+  const moveSpeed = baseSpeed ?? s.speed;
+  const driveFactor = Math.max(0.5, lerp(P.driveRadius[0], P.driveRadius[1], tUp(moveSpeed)) + (baseSpeed === null ? 0 : P.speedUpgradeDrive * (tUp(s.speed) - tUp(baseSpeed))));
   return {
     mass: lerp(0.03, 0.058, tUp(s.weight)),
     radius: ring.radius,
     gyration: disc.gyration,
     comHeight: 0.016,
     contactHeight: 0.021,
-    tipDriveRadius: (tv?.driveRadius ?? tip.driveRadius) * lerp(P.driveRadius[0], P.driveRadius[1], tUp(s.speed)),
+    tipDriveRadius: (tv?.driveRadius ?? tip.driveRadius) * driveFactor,
     axisSettleRate: tv?.axisSettleRate ?? 0,
-    tipTraction: (tv?.traction ?? tip.traction) * lerp(P.traction[0], P.traction[1], tUp(s.speed)),
+    tipTraction: (tv?.traction ?? tip.traction) * lerp(P.traction[0], P.traction[1], tUp(moveSpeed)),
     tipSpinFriction: tv?.spinFriction ?? tip.spinFrictionV03 ?? tip.spinFriction,
     tipSpinRadius: tv?.spinRadius ?? tip.spinRadius,
     airDrag: 4e-9,
@@ -261,7 +279,8 @@ export function deriveTopPhysics(def: TopDefinition, opts: DeriveOptions = {}): 
   const parts = resolveParts(def);
   if (ruleset === 'v0.2') return derivePhysicsV02(stats, parts, def.spinDirection);
   if (ruleset === 'v0.3') return derivePhysicsV03(stats, parts, def.spinDirection);
-  return derivePhysicsV041(stats, parts, def.spinDirection);
+  if (ruleset === 'v0.4.1') return derivePhysicsV041(stats, parts, def.spinDirection);
+  return derivePhysicsV041(stats, parts, def.spinDirection, baseStats(def, ruleset).speed);
 }
 
 /** Health points per point of the health stat (confirmed: 10 × health stat). */

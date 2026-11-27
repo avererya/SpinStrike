@@ -75,7 +75,9 @@ describe('upgrades have real combat effects', () => {
     const up0 = up.tops[0]!;
     expect(up0.spinDecay).toBeLessThan(bp.spinDecay); // stamina
     expect(up0.launchSpeed).toBeGreaterThan(bp.launchSpeed); // speed (beyond the old 100 ceiling for Inferno)
-    expect(up0.tipTraction).toBeGreaterThan(bp.tipTraction);
+    expect(up0.tipTraction).toBe(bp.tipTraction); // v0.5: upgrade speed keeps base traction…
+    expect(up0.tipDriveRadius).toBeLessThan(bp.tipDriveRadius); // …and tightens the drive
+    expect(up0.boostPower!).toBeGreaterThan(bp.boostPower!); // and raises Boost authority
     expect(up0.mass).toBe(bp.mass); // weight is not upgradeable
     const defUp = buildBattleOptions(buildCareerConfig(setup, { definitionId: 'titan', upgrades: { ...zeroRanks(), defense: 10 } })).topCombat![0]!;
     expect(defUp.defense).toBeCloseTo(90 * 1.4, 6); // v0.4.1 Titan defense 90

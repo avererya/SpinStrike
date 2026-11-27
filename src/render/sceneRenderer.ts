@@ -132,7 +132,7 @@ export class SceneRenderer {
     this.shields = defs.map(() => {
       const m = new THREE.Mesh(
         this.shieldGeo,
-        new THREE.MeshBasicMaterial({ color: BRACE_COLOR, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }),
+        new THREE.MeshBasicMaterial({ color: BRACE_COLOR, transparent: true, opacity: 0, depthWrite: false, blending: THREE.NormalBlending }),
       );
       m.rotation.x = -Math.PI / 2;
       m.visible = false;

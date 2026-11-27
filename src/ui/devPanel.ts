@@ -91,7 +91,7 @@ export class DevPanel {
     const L = config.launch;
     const ruleset = this.select(
       'Ruleset (stats & stat → physics mapping)',
-      RULESETS.map((r) => ({ value: r, label: r === 'v0.2' ? 'v0.2 legacy' : r === 'v0.3' ? 'v0.3 / v0.4.0 baseline' : `${r} (current)` })),
+      RULESETS.map((r) => ({ value: r, label: r === 'v0.2' ? 'v0.2 legacy' : r === 'v0.3' ? 'v0.3 / v0.4.0 baseline' : r === 'v0.4.1' ? 'v0.4.1 (Speed upgrades widen the drive)' : `${r} (current)` })),
       config.ruleset,
       (v) => {
         config.ruleset = v as Ruleset;

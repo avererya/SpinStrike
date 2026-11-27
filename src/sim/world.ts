@@ -433,7 +433,10 @@ export class World {
       st.braceTicks.push(t);
       this.pushTactical({ kind: 'brace-start', slot: cmd.slot, tick: t, x: b!.x, y: b!.y, dirX: 0, dirY: 0, strength: 1, amount: 0 });
     }
-    this.commandLog.push(Object.freeze({ ...cmd, ...(cmd.ability === 'boost' ? { dirX: v.dirX, dirY: v.dirY, strength: v.strength } : {}) }));
+    // The log keeps the direction exactly as requested (re-normalising an
+    // already normalised vector can change the last bit, which would break
+    // bit-exact replays) and the strength as applied (clamped).
+    this.commandLog.push(Object.freeze(cmd.ability === 'boost' ? { tick: cmd.tick, slot: cmd.slot, ability: cmd.ability, dirX: cmd.dirX, dirY: cmd.dirY, strength: v.strength } : { tick: cmd.tick, slot: cmd.slot, ability: cmd.ability }));
     return v;
   }
 

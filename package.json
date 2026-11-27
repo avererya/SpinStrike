@@ -1,7 +1,7 @@
 {
   "name": "spinstrike",
-  "version": "0.4.1",
-  "description": "SpinStrike v0.4.1 progression game",
+  "version": "0.5.0",
+  "description": "SpinStrike v0.5.0 tactical combat",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -12,7 +12,12 @@
     "sim": "tsx scripts/headless.ts",
     "dynamics": "tsx scripts/dynamics.ts",
     "upgrades": "tsx scripts/upgrades.ts",
-    "aim": "tsx scripts/aim.ts"
+    "aim": "tsx scripts/aim.ts",
+    "tactics": "tsx scripts/tactical-sim.ts",
+    "speed": "tsx scripts/speed-ranks.ts",
+    "full-builds": "tsx scripts/full-builds.ts",
+    "economy:v05": "tsx scripts/economy-v05.ts",
+    "tactics:learn": "tsx scripts/tactical-learn.ts"
   },
   "license": "UNLICENSED",
   "devDependencies": {

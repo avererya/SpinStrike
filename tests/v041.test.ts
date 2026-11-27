@@ -10,7 +10,7 @@ function validateConfigRoundTrip(c: SandboxConfig): SandboxConfig | null {
 }
 import { effectiveStats } from '../src/career/progression';
 import { getTop, LEGACY_V040_STATS, STARTER_TOPS } from '../src/content/tops';
-import { deriveTopPhysics, PHYSICS_VERSION } from '../src/content/derive';
+import { deriveTopPhysics } from '../src/content/derive';
 import { makeLaunch } from '../src/sim/launch';
 import { zeroRanks, DIFFICULTY_REWARD_PERCENT } from '../src/career/config';
 import { calculateReward } from '../src/career/progression';
@@ -220,9 +220,21 @@ describe('v0.4.1 stats and stat → physics mapping', () => {
   });
   it('speed scales tip drive, traction and launch speed past 100', () => {
     const t = getTop('inferno');
-    const p = (sp: number) => deriveTopPhysics(t, { stats: { ...t.stats, speed: sp } });
+    const p = (sp: number) => deriveTopPhysics(t, { ruleset: 'v0.4.1', stats: { ...t.stats, speed: sp } });
     expect(p(112.5).launchSpeed).toBeGreaterThan(p(100).launchSpeed);
     expect(p(112.5).tipDriveRadius).toBeGreaterThan(p(90).tipDriveRadius);
+  });
+  it('v0.5 ruleset: upgrade speed tightens the drive, keeps base traction, raises launch speed and boost authority; base tops unchanged', () => {
+    for (const t of STARTER_TOPS) {
+      const base = (r: 'v0.4.1' | 'v0.5') => deriveTopPhysics(t, { ruleset: r });
+      expect(base('v0.5')).toEqual(base('v0.4.1'));
+      const up = deriveTopPhysics(t, { stats: { ...t.stats, speed: t.stats.speed * 1.25 } });
+      const b = base('v0.5');
+      expect(up.tipDriveRadius).toBeLessThan(b.tipDriveRadius);
+      expect(up.tipTraction).toBe(b.tipTraction);
+      expect(up.launchSpeed).toBeGreaterThan(b.launchSpeed);
+      expect(up.boostPower!).toBeGreaterThan(b.boostPower!);
+    }
   });
   it('effective stats are recalculated from ranks for the active ruleset', () => {
     const d = getTop('titan');

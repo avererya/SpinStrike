@@ -54,6 +54,18 @@ export const MAX_RANK_BONUS: Record<UpgradeStat, number> = {
   critChance: 0.2,
 };
 
+/**
+ * What the rank-10 percentages above are a percentage OF (v0.5):
+ *   'percent'   – each top's own base stat (v0.4 rule). High bases gain the
+ *                 most points, which made fully upgraded Titan (largest
+ *                 Health and Defense) win 63 % of full-vs-full battles.
+ *   'reference' – the roster-average base stat (UPGRADE_REFERENCE_STATS),
+ *                 so every top gains the same number of points per rank.
+ *                 Same percentages and costs; no class modifier.
+ */
+export type UpgradeBonusBasis = 'percent' | 'reference';
+export const UPGRADE_BONUS_BASIS: UpgradeBonusBasis = 'percent';
+
 /** Highest upgrade rank available at a given top level (APPROVED). Sorted by level. */
 export const LEVEL_RANK_GATES: readonly { level: number; maxRank: number }[] = [
   { level: 1, maxRank: 2 },
