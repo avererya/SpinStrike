@@ -6,6 +6,7 @@
  * docs/PROGRESSION.md. Nothing in this file touches the combat engine.
  */
 import type { LaunchDistribution } from '../sim/launch';
+import { AIM_LIMITS, DEFAULT_AI_AIM, type AiAimProfile } from '../sim/launchGeometry';
 
 // ------------------------------------------------------------------ rarity
 export type Rarity = 'common' | 'rare' | 'epic' | 'legendary';
@@ -52,6 +53,18 @@ export const MAX_RANK_BONUS: Record<UpgradeStat, number> = {
   speed: 0.25,
   critChance: 0.2,
 };
+
+/**
+ * What the rank-10 percentages above are a percentage OF (v0.5):
+ *   'percent'   – each top's own base stat (v0.4 rule). High bases gain the
+ *                 most points, which made fully upgraded Titan (largest
+ *                 Health and Defense) win 63 % of full-vs-full battles.
+ *   'reference' – the roster-average base stat (UPGRADE_REFERENCE_STATS),
+ *                 so every top gains the same number of points per rank.
+ *                 Same percentages and costs; no class modifier.
+ */
+export type UpgradeBonusBasis = 'percent' | 'reference';
+export const UPGRADE_BONUS_BASIS: UpgradeBonusBasis = 'percent';
 
 /** Highest upgrade rank available at a given top level (APPROVED). Sorted by level. */
 export const LEVEL_RANK_GATES: readonly { level: number; maxRank: number }[] = [
@@ -131,9 +144,8 @@ export const BASE_REWARDS: Record<RankTier, { credits: number; xp: number }> = {
   master: { credits: 600, xp: 250 },
 };
 
-export type Difficulty = 'easy' | 'normal' | 'hard' | 'expert';
-export const DIFFICULTIES: readonly Difficulty[] = ['easy', 'normal', 'hard', 'expert'];
-export const DIFFICULTY_LABEL: Record<Difficulty, string> = { easy: 'Easy', normal: 'Normal', hard: 'Hard', expert: 'Expert' };
+import { DIFFICULTIES, DIFFICULTY_LABEL, type Difficulty } from '../ai/difficulty';
+export { DIFFICULTIES, DIFFICULTY_LABEL, type Difficulty };
 /**
  * Reward multiplier in percent. v0.4.1 TEMPORARY values (approved): difficulty
  * currently changes only the AI's launch quality, and simulated win rates
@@ -155,11 +167,39 @@ export const DIFFICULTY_LAUNCH: Record<Difficulty, LaunchDistribution> = {
   hard: { poor: 0.05, good: 0.25, great: 0.45, perfect: 0.25 },
   expert: { poor: 0, good: 0.1, great: 0.4, perfect: 0.5 },
 };
+/**
+ * v0.5 AI launch-aim skill per difficulty. Easy aims anywhere (often badly),
+ * Normal keeps the v0.4.1 profile, Hard and Expert aim close to the aim that
+ * suits their top best (v0.4.1 aim evaluation: Inferno and Phantom −45°/0°,
+ * Titan +45°/30°, Tempest 0°/15°), with seeded spread. Aim changes no stat.
+ */
+export const PREFERRED_AIM: Readonly<Record<string, { direction: number; tilt: number }>> = {
+  inferno: { direction: -45, tilt: 0 },
+  titan: { direction: 45, tilt: 30 },
+  tempest: { direction: 0, tilt: 15 },
+  phantom: { direction: -45, tilt: 0 },
+};
+const AIM_SPREAD: Record<'hard' | 'expert', { direction: number; tilt: number }> = {
+  hard: { direction: 18, tilt: 8 },
+  expert: { direction: 8, tilt: 4 },
+};
+export function difficultyAiAim(d: Difficulty, topId: string): AiAimProfile {
+  if (d === 'easy') return { direction: { min: -45, max: 45 }, tilt: { min: 0, max: 30 } };
+  const pref = PREFERRED_AIM[topId];
+  if (d === 'normal' || !pref) return { direction: { ...DEFAULT_AI_AIM.direction }, tilt: { ...DEFAULT_AI_AIM.tilt } };
+  const sp = AIM_SPREAD[d];
+  const clampR = (c: number, w: number, lo: number, hi: number) => ({ min: Math.max(lo, c - w), max: Math.min(hi, c + w) });
+  return {
+    direction: clampR(pref.direction, sp.direction, AIM_LIMITS.direction.min, AIM_LIMITS.direction.max),
+    tilt: clampR(pref.tilt, sp.tilt, AIM_LIMITS.tilt.min, AIM_LIMITS.tilt.max),
+  };
+}
+
 export const DIFFICULTY_DESCRIPTION: Record<Difficulty, string> = {
-  easy: 'Opponent launches are often weak.',
-  normal: 'Typical opponent launches.',
-  hard: 'Opponent launches are usually strong.',
-  expert: 'Opponent almost always launches well.',
+  easy: 'Weak launches, careless aim, slow and clumsy with Boost and Brace.',
+  normal: 'Typical launches and aim; uses abilities sensibly but makes mistakes.',
+  hard: 'Strong launches, good aim, quick and well-timed abilities.',
+  expert: 'Near-perfect launches and aim, sharp Brace timing and careful charge use.',
 };
 
 export type BattleOutcomeKind = 'win' | 'loss' | 'draw';

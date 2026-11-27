@@ -206,3 +206,24 @@ Approved design requirements and provisional values are listed separately in `do
 **Prepared for v0.5 (not implemented):** directional boost and brace. Aiming already uses the same physical levers a boost would (tip drive direction, tilt), and Speed's weak effect on win rate is a candidate for the boost's strength.
 
 **Future (not implemented):** equipment, signature abilities (levels 10 and 20 reserved), shop, more tops and stadiums, championships, bosses, achievements, cosmetics, multiplayer.
+
+## v0.5 scope: tactical combat & intelligent AI [Confirmed, delivered]
+
+Details and evidence: [`docs/TACTICAL_COMBAT_v0.5.md`](docs/TACTICAL_COMBAT_v0.5.md).
+
+- **Directional Boost [Confirmed].**
+  - Aim-and-release anywhere in the stadium, no slowdown.
+  - 3 charges, 3 s cooldown, strength 33–100 % from drag length normalised to the stadium size, cost 1–3 % of launch rotational energy.
+  - A physical impulse (Δv = J/m, adds to velocity, kinetic gain ≤ 90 % of the paid energy, never creates energy), with no auto-targeting.
+  - Speed scales boost authority (0.5 + speed/100), its only effect on Boost.
+- **Defensive Brace [Confirmed].** 2 charges, 1.5 s, 5 s cooldown from activation, −30 % damage (ordinary and critical), −25 % knockback (momentum-conserving), no stamina cost, simulation time, no stacking, no heal, no invulnerability. Combinable with Boost.
+- **Charges [Confirmed].** Fixed per battle, no regeneration, full at the start of each battle, never purchasable. `TacticalModifiers` keeps room for future equipment or signature modifiers; none apply in v0.5.
+- **AI [Confirmed].**
+  - Same validated commands as the player.
+  - Observation-only, short-horizon prediction.
+  - Personalities are reusable profiles (Striker / Bulwark / Endurer / Tactician), defaulted by class and overridable per top.
+- **Difficulty [Confirmed].** It changes decision quality, launch quality and launch aim only. It never changes stats or charges. Expert remains beatable.
+- **Speed [Provisional, needs approval].** Ruleset v0.5: upgrade Speed tightens the tip drive (base Speed keeps the v0.4.1 mapping).
+- **Upgrade bonus basis [Open decision].** Today: % of own base (approved v0.4 rule). Alternative: % of roster-average base, which narrows full-build spread from 36–62 % to 41–58 %.
+- **Reward multipliers [Temporary, unchanged].** 0.75 / 1.0 / 1.1 / 1.2. Credits per hour are roughly flat from Normal to Expert.
+- **Out of scope for v0.5:** signature abilities, regenerating charges, purchasable ability upgrades, steering, slow motion, new tops, shop, equipment, new stadiums, championships, bosses, multiplayer, backend.

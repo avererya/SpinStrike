@@ -51,6 +51,53 @@ export interface BattleRecord {
   /** Launch aim of the player and the opponent (v0.4.1+; absent on older records). */
   aim?: { direction: number; tilt: number };
   opponentAim?: { direction: number; tilt: number };
+  /**
+   * v0.5 tactical abilities: per-side usage (player first). Absent on records
+   * made before v0.5 (never back-filled) and on battles with abilities off.
+   */
+  tactical?: { player: TacticalSide; opponent: TacticalSide };
+  /** v0.5: the opponent's aim-skill range at this difficulty, degrees (absent on older records). */
+  launchSettings?: { opponentAimDirection: [number, number]; opponentAimTilt: [number, number] };
+}
+
+/** One side's tactical usage in a battle record (v0.5). */
+export interface TacticalSide {
+  boosts: number;
+  braces: number;
+  boostsLeft: number;
+  bracesLeft: number;
+  /** Stamina spent on boosts, % of launch energy. */
+  staminaSpent: number;
+  braceImpacts: number;
+  damagePrevented: number;
+  boostsToHit: number;
+  boostKnockout: boolean;
+}
+
+/**
+ * Lifetime tactical statistics of an owned top (v0.5). Counted only from
+ * battles played with abilities (v0.5+): older battles are NOT back-filled,
+ * so `battles` here can be lower than the top's total battles.
+ */
+export interface TacticalLifetime {
+  battles: number;
+  boostsUsed: number;
+  bracesUsed: number;
+  /** Stamina spent on boosts, sum of % of launch energy. */
+  staminaSpent: number;
+  braceImpacts: number;
+  damagePrevented: number;
+  /** Boosts followed by a damaging hit within ATTRIBUTION.boostToHit. */
+  boostsToHit: number;
+  /** Knockouts won within ATTRIBUTION.boostToKnockout of the player's boost (with a hit in between). */
+  boostKnockouts: number;
+  /** Battles (and wins) in which the player used no ability at all. */
+  noAbilityBattles: number;
+  noAbilityWins: number;
+}
+
+export function emptyTacticalLifetime(): TacticalLifetime {
+  return { battles: 0, boostsUsed: 0, bracesUsed: 0, staminaSpent: 0, braceImpacts: 0, damagePrevented: 0, boostsToHit: 0, boostKnockouts: 0, noAbilityBattles: 0, noAbilityWins: 0 };
 }
 
 export interface TopStats {
@@ -73,6 +120,8 @@ export interface TopStats {
   vsClass: Record<string, Tally>;
   vsTop: Record<string, Tally>;
   byStadium: Record<string, Tally>;
+  /** v0.5 lifetime tactical statistics (since the first v0.5 battle). */
+  tactics: TacticalLifetime;
   recent: BattleRecord[];
 }
 
@@ -100,6 +149,7 @@ export function emptyTopStats(): TopStats {
     vsClass: {},
     vsTop: {},
     byStadium: {},
+    tactics: emptyTacticalLifetime(),
     recent: [],
   };
 }
@@ -154,6 +204,23 @@ export function recordBattle(s: TopStats, r: BattleRecord): TopStats {
   o.vsClass[r.opponent.topClass] = bump(o.vsClass[r.opponent.topClass], r.result);
   o.vsTop[r.opponent.topId] = bump(o.vsTop[r.opponent.topId], r.result);
   o.byStadium[r.stadiumId] = bump(o.byStadium[r.stadiumId], r.result);
+  const tp = r.tactical?.player;
+  if (tp) {
+    const t = { ...(s.tactics ?? emptyTacticalLifetime()) };
+    t.battles++;
+    t.boostsUsed += tp.boosts;
+    t.bracesUsed += tp.braces;
+    t.staminaSpent = Math.round((t.staminaSpent + tp.staminaSpent) * 100) / 100;
+    t.braceImpacts += tp.braceImpacts;
+    t.damagePrevented = Math.round((t.damagePrevented + tp.damagePrevented) * 10) / 10;
+    t.boostsToHit += tp.boostsToHit;
+    if (tp.boostKnockout) t.boostKnockouts++;
+    if (tp.boosts === 0 && tp.braces === 0) {
+      t.noAbilityBattles++;
+      if (r.result === 'win') t.noAbilityWins++;
+    }
+    o.tactics = t;
+  }
   o.recent = [...s.recent, r].slice(-RECENT_BATTLE_LIMIT);
   return o;
 }
@@ -218,6 +285,55 @@ function sanitizeRecord(v: unknown): BattleRecord | null {
     ...(typeof v.ruleset === 'string' && v.ruleset.length > 0 && v.ruleset.length < 32 ? { ruleset: v.ruleset } : {}),
     ...(isAimLike(v.aim) ? { aim: { direction: v.aim.direction, tilt: v.aim.tilt } } : {}),
     ...(isAimLike(v.opponentAim) ? { opponentAim: { direction: v.opponentAim.direction, tilt: v.opponentAim.tilt } } : {}),
+    ...sanitizeTactical(v.tactical),
+    ...sanitizeLaunchSettings(v.launchSettings),
+  };
+}
+
+function sanitizeSide(v: unknown): TacticalSide | null {
+  if (!isObj(v)) return null;
+  return {
+    boosts: int(v.boosts, 0, 0, 1000),
+    braces: int(v.braces, 0, 0, 1000),
+    boostsLeft: int(v.boostsLeft, 0, 0, 1000),
+    bracesLeft: int(v.bracesLeft, 0, 0, 1000),
+    staminaSpent: num(v.staminaSpent, 0, 0, 1000),
+    braceImpacts: int(v.braceImpacts, 0, 0, 100000),
+    damagePrevented: num(v.damagePrevented, 0),
+    boostsToHit: int(v.boostsToHit, 0, 0, 1000),
+    boostKnockout: v.boostKnockout === true,
+  };
+}
+
+function sanitizeTactical(v: unknown): { tactical: { player: TacticalSide; opponent: TacticalSide } } | Record<string, never> {
+  if (!isObj(v)) return {};
+  const p = sanitizeSide(v.player);
+  const o = sanitizeSide(v.opponent);
+  return p && o ? { tactical: { player: p, opponent: o } } : {};
+}
+
+function sanitizeLaunchSettings(v: unknown): { launchSettings: NonNullable<BattleRecord['launchSettings']> } | Record<string, never> {
+  if (!isObj(v)) return {};
+  const pair = (x: unknown): [number, number] | null =>
+    Array.isArray(x) && x.length === 2 && x.every((n) => typeof n === 'number' && Number.isFinite(n)) ? [num(x[0], 0, -90, 90), num(x[1], 0, -90, 90)] : null;
+  const d = pair(v.opponentAimDirection);
+  const t = pair(v.opponentAimTilt);
+  return d && t ? { launchSettings: { opponentAimDirection: d, opponentAimTilt: t } } : {};
+}
+
+export function sanitizeTacticalLifetime(v: unknown): TacticalLifetime {
+  const o = isObj(v) ? v : {};
+  return {
+    battles: int(o.battles, 0),
+    boostsUsed: int(o.boostsUsed, 0),
+    bracesUsed: int(o.bracesUsed, 0),
+    staminaSpent: num(o.staminaSpent, 0),
+    braceImpacts: int(o.braceImpacts, 0),
+    damagePrevented: num(o.damagePrevented, 0),
+    boostsToHit: int(o.boostsToHit, 0),
+    boostKnockouts: int(o.boostKnockouts, 0),
+    noAbilityBattles: int(o.noAbilityBattles, 0),
+    noAbilityWins: int(o.noAbilityWins, 0),
   };
 }
 
@@ -253,6 +369,7 @@ export function sanitizeTopStats(v: unknown): TopStats {
     vsClass: tallyMap(v.vsClass),
     vsTop: tallyMap(v.vsTop),
     byStadium: tallyMap(v.byStadium),
+    tactics: sanitizeTacticalLifetime(v.tactics),
     recent,
   };
 }

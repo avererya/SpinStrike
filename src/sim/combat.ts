@@ -345,8 +345,13 @@ export function applyContactDamage(
     if (baseToB > 0) critB = isCritical(A.combat.critChance, critRoll(seed, impact, A.index));
     if (baseToA > 0) critA = isCritical(B.combat.critChance, critRoll(seed, impact, B.index));
   }
-  const toB = critB ? finite(baseToB * Math.max(1, finite(A.combat.critMultiplier))) : baseToB;
-  const toA = critA ? finite(baseToA * Math.max(1, finite(B.combat.critMultiplier))) : baseToA;
+  const rawB = critB ? finite(baseToB * Math.max(1, finite(A.combat.critMultiplier))) : baseToB;
+  const rawA = critA ? finite(baseToA * Math.max(1, finite(B.combat.critMultiplier))) : baseToA;
+  // Defensive Brace (v0.5): the final damage (ordinary or critical, after
+  // defense and the ring's damage cap) is reduced by the braced top's
+  // active reduction. Never below 0, never a heal.
+  const toB = braceReduce(B, rawB);
+  const toA = braceReduce(A, rawA);
 
   applyHit(B, A, toB, step, r.nx, r.ny, critB);
   applyHit(A, B, toA, step, -r.nx, -r.ny, critA);
@@ -371,6 +376,15 @@ export function applyContactDamage(
   out.normalSpeed = r.vn;
   out.impact = impact;
   return true;
+}
+
+function braceReduce(target: TopBody, dmg: number): number {
+  const k = target.braceDamage;
+  if (!(k > 0) || !(dmg > 0)) return dmg;
+  const out = dmg * (1 - Math.min(0.9, k));
+  target.bracePrevented += dmg - out;
+  target.braceImpacts++;
+  return out;
 }
 
 function applyHit(target: TopBody, source: TopBody, dmg: number, step: number, dirX: number, dirY: number, crit = false): void {

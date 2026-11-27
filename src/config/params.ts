@@ -138,3 +138,25 @@ export type MovementParamKey = (typeof MOVEMENT_PARAMS)[number]['key'];
 export const SIM_LIMITS = {
   maxDuration: { min: 5, max: 600 },
 } as const;
+
+/** v0.5 Directional Boost parameters (sandbox / developer). */
+export const BOOST_PARAMS = [
+  { key: 'charges', label: 'Boost charges', min: 0, max: 20, step: 1, unit: '', help: 'Boost charges per battle (no regeneration).' },
+  { key: 'cooldown', label: 'Boost cooldown', min: 0, max: 30, step: 0.1, unit: 's', help: 'Simulation seconds between boosts.' },
+  { key: 'minStrength', label: 'Minimum boost strength', min: 0.05, max: 1, step: 0.01, unit: '', help: 'Shortest accepted gesture (normalised). Shorter gestures are cancelled, not rounded up.' },
+  { key: 'maxStrength', label: 'Maximum boost strength', min: 0.05, max: 1, step: 0.01, unit: '', help: 'Strength of a full-length gesture (1 = 100 %).' },
+  { key: 'minCost', label: 'Boost cost at minimum strength', min: 0, max: 0.2, step: 0.001, unit: '×E₀', help: 'Stamina cost as a fraction of the battle’s launch rotational energy (0.01 = 1 %).' },
+  { key: 'maxCost', label: 'Boost cost at maximum strength', min: 0, max: 0.2, step: 0.001, unit: '×E₀', help: 'Stamina cost as a fraction of the battle’s launch rotational energy (0.03 = 3 %).' },
+  { key: 'impulse', label: 'Boost impulse (strength 1)', min: 0, max: 0.1, step: 0.0005, unit: 'N·s', help: 'Impulse at full strength for boost authority 1. Δv = J/m: heavier tops gain less speed.' },
+  { key: 'efficiency', label: 'Boost energy ceiling', min: 0, max: 1, step: 0.01, unit: '', help: 'Maximum share of the paid spin energy that may become translational energy (never creates energy).' },
+] as const satisfies readonly ParamSpec[];
+
+/** v0.5 Defensive Brace parameters (sandbox / developer). */
+export const BRACE_PARAMS = [
+  { key: 'charges', label: 'Brace charges', min: 0, max: 20, step: 1, unit: '', help: 'Brace charges per battle (no regeneration).' },
+  { key: 'duration', label: 'Brace duration', min: 0.05, max: 10, step: 0.05, unit: 's', help: 'Active time in simulation seconds.' },
+  { key: 'cooldown', label: 'Brace cooldown', min: 0, max: 30, step: 0.1, unit: 's', help: 'Counted from activation.' },
+  { key: 'damageReduction', label: 'Brace damage reduction', min: 0, max: 0.9, step: 0.01, unit: '', help: 'Share of incoming structural damage removed (ordinary and critical hits).' },
+  { key: 'knockbackReduction', label: 'Brace knockback reduction', min: 0, max: 0.9, step: 0.01, unit: '', help: 'Share of the top–top contact impulse absorbed (more inelastic contact; momentum between the tops is conserved).' },
+  { key: 'staminaCost', label: 'Brace stamina cost', min: 0, max: 0.2, step: 0.001, unit: '×E₀', help: 'Stamina cost per activation (0 in v0.5).' },
+] as const satisfies readonly ParamSpec[];

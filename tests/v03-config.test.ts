@@ -15,6 +15,7 @@ describe('v0.3 configuration', () => {
     delete v2.ruleset;
     delete v2.launch;
     delete v2.movement;
+    delete v2.tactical;
     delete v2.results;
     delete v2.combat.criticalHits;
     delete v2.presentation.criticalEffects;

@@ -104,6 +104,13 @@ export interface TopPhysicsParams {
   /** 0–1 fraction of impact spin loss this top ignores. */
   impactSpinResist: number;
 
+  /**
+   * v0.5 Directional Boost authority (dimensionless, 1 = nominal): how
+   * strongly the tip can dig in and push off. Derived from Speed only (the
+   * single place Speed touches Boost). Scales the boost impulse; Δv then
+   * follows from the mass. Optional: undefined = 1.
+   */
+  boostPower?: number;
   /** +1 = right spin (counter-clockwise from above), −1 = left spin. */
   spinDirection: 1 | -1;
   /** Launch rotational kinetic energy, J. */

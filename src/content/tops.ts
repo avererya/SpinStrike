@@ -22,6 +22,12 @@ export interface TopDefinition {
   palette: TopPalette;
   /** +1 = right spin (clockwise from above), −1 = left spin. */
   spinDirection: 1 | -1;
+  /**
+   * v0.5: tactical AI personality id (src/ai/profiles.ts). Optional: the
+   * class default is used when absent, so future tops of the same class can
+   * fight differently without engine changes.
+   */
+  tacticalProfile?: string;
 }
 
 export const STARTER_TOPS: readonly TopDefinition[] = [

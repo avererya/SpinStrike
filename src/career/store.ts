@@ -29,8 +29,24 @@ import {
   type RankState,
   type Reward,
 } from './progression';
-import { recordBattle, type BattleRecord } from './history';
+import { recordBattle, type BattleRecord, type TacticalSide } from './history';
 import { PHYSICS_VERSION } from '../content/derive';
+import { COMBAT_RULESET, type TacticalTopSummary } from '../sim/tactics';
+import { difficultyAiAim } from './config';
+
+function tacticalSide(t: TacticalTopSummary): TacticalSide {
+  return {
+    boosts: t.boostsUsed,
+    braces: t.bracesUsed,
+    boostsLeft: t.boostsLeft,
+    bracesLeft: t.bracesLeft,
+    staminaSpent: Math.round(t.boostCost * 10000) / 100,
+    braceImpacts: t.braceImpacts,
+    damagePrevented: Math.round(t.damagePrevented * 10) / 10,
+    boostsToHit: t.boostsToHit,
+    boostKnockout: t.boostKnockout,
+  };
+}
 import { clampAim, type LaunchAim } from '../sim/launchGeometry';
 import { SAVE_SCHEMA_VERSION, createCareer, loadSaveData, makeExport, parseImport, type CareerSave, type OwnedTop } from './save';
 import type { CareerBattleSetup } from './battle';
@@ -318,8 +334,13 @@ export class CareerStore {
       damageReceived: Math.round(theirs.damageDealt * 10) / 10,
       crits: mine.critsLanded,
       rewards: reward,
-      ruleset: PHYSICS_VERSION,
+      ruleset: result.tactical?.enabled ? COMBAT_RULESET : PHYSICS_VERSION,
       ...(result.aims ? { aim: { ...result.aims[0]! }, opponentAim: { ...result.aims[1]! } } : {}),
+      ...(result.tactical?.enabled ? { tactical: { player: tacticalSide(result.tactical.tops[0]!), opponent: tacticalSide(result.tactical.tops[1]!) } } : {}),
+      launchSettings: (() => {
+        const a = difficultyAiAim(setup.difficulty, setup.opponent.topId);
+        return { opponentAimDirection: [a.direction.min, a.direction.max], opponentAimTilt: [a.tilt.min, a.tilt.max] };
+      })(),
     };
 
     const rankBefore = s.rank;

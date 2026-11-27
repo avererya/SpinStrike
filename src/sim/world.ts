@@ -6,6 +6,24 @@ import { integrateFree, guardBody } from './dynamics';
 import { resolveTopPair, resolveWall, wallImpact, type CollisionEvent, type CollisionParams, type ContactState } from './collision';
 import { LIMITS } from './units';
 import { BattleTelemetry } from './telemetry';
+import {
+  ATTRIBUTION,
+  PASSIVE_TACTICS,
+  applyBoost,
+  braceActive,
+  effectiveTactics,
+  makeTacticalState,
+  validateCommand,
+  type AbilityView,
+  type BoostParams,
+  type BraceParams,
+  type TacticalCommand,
+  type TacticalEvent,
+  type TacticalModifiers,
+  type TacticalParams,
+  type TacticalState,
+  type Validation,
+} from './tactics';
 import { DEFAULT_AIM, LAUNCH_COMPONENT, clampAim, launchJitter, nominalPlacementAngle, type LaunchAim, type LaunchVariation } from './launchGeometry';
 import {
   DEFAULT_COMBAT,
@@ -65,6 +83,10 @@ export interface WorldOptions {
   traceEvery?: number;
   /** Per-slot launch aim (v0.4.1 launch model only). Default DEFAULT_AIM. */
   aims?: readonly (LaunchAim | undefined)[];
+  /** v0.5 tactical abilities. Undefined or disabled = v0.4.1 passive combat. */
+  tactics?: TacticalParams;
+  /** v0.5: per-slot ability modifiers (future equipment). Unused in v0.5. */
+  tacticalModifiers?: readonly (TacticalModifiers | undefined)[];
 }
 
 export interface StepStats {
@@ -77,6 +99,7 @@ export interface StepStats {
 }
 
 const MAX_PENDING_EVENTS = 64;
+const MAX_TACTICAL_EVENTS = 32;
 const MAX_PENDING_DAMAGE = 32;
 
 /**
@@ -114,6 +137,17 @@ export class World {
   private pendingDamage: DamageEvent[] = [];
   private readonly minRadius: number;
   private readonly slopeOut = { x: 0, y: 0 };
+  // --- tactical abilities (v0.5) ---
+  readonly tactics: TacticalParams;
+  /** Effective ability parameters per slot (base + modifiers). */
+  readonly abilityParams: readonly { boost: BoostParams; brace: BraceParams }[];
+  /** Live ability state per slot. */
+  readonly abilities: readonly TacticalState[];
+  /** Every accepted command, in application order (the replay log). */
+  readonly commandLog: TacticalCommand[] = [];
+  private tacticalEvents: TacticalEvent[] = [];
+  /** Whether the current boost of each slot already led to a hit (attribution). */
+  private boostHitCounted: boolean[] = [];
 
   constructor(opts: WorldOptions) {
     this.stadium = opts.stadium;
@@ -131,6 +165,10 @@ export class World {
       }
     }
     this.minRadius = Math.min(...this.bodies.map((b) => b.params.radius));
+    this.tactics = opts.tactics ?? PASSIVE_TACTICS;
+    this.abilityParams = this.bodies.map((b) => effectiveTactics(this.tactics, opts.tacticalModifiers?.[b.index]));
+    this.abilities = this.abilityParams.map((e) => makeTacticalState(e.boost, e.brace));
+    this.boostHitCounted = this.bodies.map(() => true);
     if (opts.launch.variation) this.launchV041(opts.launch, opts.launch.variation, opts.launchEnergyMultipliers, opts.aims);
     else this.launch(opts.launch, opts.launchEnergyMultipliers);
   }
@@ -225,6 +263,7 @@ export class World {
       b.py = b.y;
       b.prevAngle = b.angle;
     }
+    if (this.tactics.enabled) this.updateBraceFlags();
 
     // Choose substeps so no body moves more than ¼ of the smallest radius
     // per substep: prevents tunnelling at high speed.
@@ -256,10 +295,13 @@ export class World {
           }
           if (ev) this.pushEvent(ev);
           if (this.combatEnabled) {
+            const pa = A.bracePrevented;
+            const pb = B.bracePrevented;
             if (applyContactDamage(A, B, this.report, pair, cp, this.steps, this.stepHz, this.damageScratch, this.seed, this.impactCount)) {
               this.impactCount++;
               this.telemetry.onDamagingHit(this.steps);
               this.pushDamage({ ...this.damageScratch });
+              if (this.tactics.enabled) this.onTacticalHit(A, B, A.bracePrevented - pa, B.bracePrevented - pb);
             }
             updatePairArming(A, B, pair, cp);
           }
@@ -313,6 +355,130 @@ export class World {
 
   get time(): number {
     return this.steps * this.dt;
+  }
+
+  // ------------------------------------------------------- tactical (v0.5)
+  /** Sets each body's Brace effect for the step about to run; reports expiries. */
+  private updateBraceFlags(): void {
+    const t = this.steps;
+    for (const b of this.bodies) {
+      const st = this.abilities[b.index]!;
+      const on = b.eliminated === null && braceActive(st, t);
+      const r = this.abilityParams[b.index]!.brace;
+      b.braceKnockback = on ? r.knockbackReduction : 0;
+      b.braceDamage = on ? r.damageReduction : 0;
+      if (st.braceUntilTick === t && st.braceStartTick >= 0) this.pushTactical({ kind: 'brace-end', slot: b.index, tick: t, x: b.x, y: b.y, dirX: 0, dirY: 0, strength: 0, amount: 0 });
+    }
+  }
+
+  private onTacticalHit(A: TopBody, B: TopBody, prevA: number, prevB: number): void {
+    const t = this.steps;
+    const r = this.report;
+    for (const [body, prev] of [[A, prevA], [B, prevB]] as const) {
+      const st = this.abilities[body.index]!;
+      if (prev > 0) {
+        st.braceImpacts++;
+        st.damagePrevented += prev;
+        this.pushTactical({ kind: 'brace-impact', slot: body.index, tick: t, x: r.x, y: r.y, dirX: r.nx, dirY: r.ny, strength: 0, amount: prev });
+      }
+      if (!this.boostHitCounted[body.index] && t - st.lastBoostTick <= ATTRIBUTION.boostToHit * this.stepHz) {
+        this.boostHitCounted[body.index] = true;
+        st.boostsToHit++;
+      }
+    }
+  }
+
+  /**
+   * Validates and, if valid, applies a tactical command on the current tick
+   * (between steps). `running` = the battle is in normal combat. Invalid
+   * commands change nothing (no charge, no stamina) and are only counted.
+   */
+  applyCommand(cmd: TacticalCommand, running: boolean): Validation {
+    const t = this.steps;
+    const b = this.bodies[cmd.slot];
+    let v: Validation;
+    if (!this.tactics.enabled) v = { ok: false, reason: 'disabled' };
+    else if (!b) v = { ok: false, reason: 'slot' };
+    else if (cmd.tick !== t) v = { ok: false, reason: 'tick' };
+    else v = validateCommand(cmd, b, this.abilities[cmd.slot]!, this.abilityParams[cmd.slot]!, t, running && this.combatEnabled);
+    if (!v.ok) {
+      if (b) {
+        const st = this.abilities[cmd.slot]!;
+        st.rejected[v.reason] = (st.rejected[v.reason] ?? 0) + 1;
+      }
+      return v;
+    }
+    const st = this.abilities[cmd.slot]!;
+    const eff = this.abilityParams[cmd.slot]!;
+    const hz = this.stepHz;
+    if (cmd.ability === 'boost') {
+      const dv = applyBoost(b!, eff.boost, v.strength, v.dirX, v.dirY, v.cost);
+      st.boostCharges--;
+      st.boostReadyTick = t + Math.round(eff.boost.cooldown * hz);
+      st.boostsUsed++;
+      st.boostEnergy += v.cost;
+      st.boostCostFraction += b!.launchEnergy > 0 ? v.cost / b!.launchEnergy : 0;
+      st.boostStrengthSum += v.strength;
+      st.lastBoostTick = t;
+      st.boostTicks.push(t);
+      this.boostHitCounted[cmd.slot] = false;
+      this.pushTactical({ kind: 'boost', slot: cmd.slot, tick: t, x: b!.x, y: b!.y, dirX: v.dirX, dirY: v.dirY, strength: v.strength, amount: dv });
+    } else {
+      if (v.cost > 0) b!.removeSpinEnergy(v.cost);
+      st.braceCharges--;
+      st.braceStartTick = t;
+      st.braceUntilTick = t + Math.max(1, Math.round(eff.brace.duration * hz));
+      st.braceReadyTick = t + Math.round(eff.brace.cooldown * hz);
+      st.bracesUsed++;
+      st.braceTicks.push(t);
+      this.pushTactical({ kind: 'brace-start', slot: cmd.slot, tick: t, x: b!.x, y: b!.y, dirX: 0, dirY: 0, strength: 1, amount: 0 });
+    }
+    // The log keeps the direction exactly as requested (re-normalising an
+    // already normalised vector can change the last bit, which would break
+    // bit-exact replays) and the strength as applied (clamped).
+    this.commandLog.push(Object.freeze(cmd.ability === 'boost' ? { tick: cmd.tick, slot: cmd.slot, ability: cmd.ability, dirX: cmd.dirX, dirY: cmd.dirY, strength: v.strength } : { tick: cmd.tick, slot: cmd.slot, ability: cmd.ability }));
+    return v;
+  }
+
+  /** Read-only ability view of a slot for HUD / AI (simulation time only). */
+  abilityView(slot: number, running = true): AbilityView {
+    const st = this.abilities[slot]!;
+    const eff = this.abilityParams[slot]!;
+    const b = this.bodies[slot]!;
+    const t = this.steps;
+    const hz = this.stepHz;
+    const active = braceActive(st, t);
+    const probe = (ability: 'boost' | 'brace') =>
+      validateCommand({ tick: t, slot, ability, dirX: 1, dirY: 0, strength: eff.boost.minStrength }, b, st, eff, t, running && this.combatEnabled && this.tactics.enabled);
+    const vb = probe('boost');
+    const vr = probe('brace');
+    const prog = (ready: number, cd: number) => (cd > 0 ? Math.max(0, Math.min(1, 1 - (ready - t) / (cd * hz))) : 1);
+    return {
+      boostCharges: st.boostCharges,
+      braceCharges: st.braceCharges,
+      boostCooldown: Math.max(0, (st.boostReadyTick - t) / hz),
+      braceCooldown: Math.max(0, (st.braceReadyTick - t) / hz),
+      braceRemaining: active ? (st.braceUntilTick - t) / hz : 0,
+      braceActive: active,
+      boostCooldownProgress: prog(st.boostReadyTick, eff.boost.cooldown),
+      braceCooldownProgress: prog(st.braceReadyTick, eff.brace.cooldown),
+      boostAvailable: vb.ok,
+      braceAvailable: vr.ok,
+      boostBlocked: vb.ok ? null : vb.reason,
+      braceBlocked: vr.ok ? null : vr.reason,
+    };
+  }
+
+  private pushTactical(ev: TacticalEvent): void {
+    if (this.tacticalEvents.length >= MAX_TACTICAL_EVENTS) this.tacticalEvents.shift();
+    this.tacticalEvents.push(ev);
+  }
+
+  /** Returns and clears pending tactical presentation events. */
+  drainTacticalEvents(): TacticalEvent[] {
+    const out = this.tacticalEvents;
+    this.tacticalEvents = [];
+    return out;
   }
 
   private pushEvent(ev: CollisionEvent): void {

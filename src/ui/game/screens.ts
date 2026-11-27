@@ -372,8 +372,29 @@ function recordRow(r: BattleRecord): HTMLElement {
   return el('li', { class: `rec ${r.result}` }, [
     el('span', { class: 'rec-res', text: res }),
     el('span', { class: 'rec-main', text: `vs ${name} · ${r.difficulty} · ${fin} · ${fmtDuration(r.duration)}` }),
-    el('span', { class: 'rec-sub', text: `Launch ${LAUNCH_QUALITY_LABEL[r.launch]}${r.aim ? ` · aim ${r.aim.direction > 0 ? '+' : ''}${r.aim.direction}° / ${r.aim.tilt}°` : ''} · +${r.rewards.credits} ${CREDIT} +${r.rewards.xp} XP${r.ruleset ? '' : ' · v0.4.0 rules'}` }),
+    el('span', { class: 'rec-sub', text: `Launch ${LAUNCH_QUALITY_LABEL[r.launch]}${r.aim ? ` · aim ${r.aim.direction > 0 ? '+' : ''}${r.aim.direction}° / ${r.aim.tilt}°` : ''} · +${r.rewards.credits} ${CREDIT} +${r.rewards.xp} XP${r.ruleset ? (r.ruleset === 'v0.4.1' ? ' · v0.4.1 rules' : '') : ' · v0.4.0 rules'}` }),
+    ...(r.tactical
+      ? [el('span', { class: 'rec-sub', text: `You: ${r.tactical.player.boosts} boost${r.tactical.player.boosts === 1 ? '' : 's'}, ${r.tactical.player.braces} brace${r.tactical.player.braces === 1 ? '' : 's'} · Opponent: ${r.tactical.opponent.boosts} / ${r.tactical.opponent.braces}` })]
+      : []),
   ]);
+}
+
+function tacticsRows(s: TopStats): Node[] {
+  const t = s.tactics;
+  if (!t.battles) return [el('div', { class: 'muted', text: 'No battles with abilities yet. Battles before v0.5 had no Boost or Brace and are not counted here.' })];
+  const per = (x: number) => (t.battles ? (x / t.battles).toFixed(1) : '0');
+  return [
+    kv('Battles with abilities', String(t.battles)),
+    kv('Boosts used (per battle)', `${t.boostsUsed} (${per(t.boostsUsed)})`),
+    kv('Braces used (per battle)', `${t.bracesUsed} (${per(t.bracesUsed)})`),
+    kv('Stamina spent on boosts', `${t.staminaSpent.toFixed(1)} % of launch spin`),
+    kv('Boost → hit (within 1 s)', t.boostsUsed ? `${t.boostsToHit} of ${t.boostsUsed} (${fmtPct(t.boostsToHit / t.boostsUsed)})` : '—'),
+    kv('Boost → knockout (within 1.5 s)', String(t.boostKnockouts)),
+    kv('Hits taken while braced', String(t.braceImpacts)),
+    kv('Damage prevented by Brace', fmtInt(t.damagePrevented)),
+    kv('Battles / wins without abilities', `${t.noAbilityBattles} / ${t.noAbilityWins}`),
+    el('div', { class: 'hint', text: 'Counted since v0.5. Earlier battles are not back-filled.' }),
+  ];
 }
 
 export function historyScreen(ctx: GameContext, tab: 'overview' | 'matchups' | 'stadiums' = 'overview'): HTMLElement {
@@ -419,6 +440,7 @@ export function historyScreen(ctx: GameContext, tab: 'overview' | 'matchups' | '
         kv('Lifetime Credits', `${CREDIT} ${fmtInt(s.creditsEarned)}`),
         kv('Lifetime XP', fmtInt(top.lifetimeXp)),
       ]),
+      section('Tactics (Boost & Brace)', tacticsRows(s)),
       section('Launch quality', [lq]),
       section('Recent battles', [s.recent.length ? recList : el('div', { class: 'muted', text: 'No battles yet. Your first Quick Battle starts the record.' }), ...(more ? [more] : [])]),
     ];

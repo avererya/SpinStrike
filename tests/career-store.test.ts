@@ -149,7 +149,7 @@ describe('validation and migration', () => {
     expect(m.ok && m.raw.credits).toBe(50);
     expect(m.ok && m.raw.schemaVersion).toBe(3);
     expect(migrateSave({ schemaVersion: 1 }, {}, 2).ok).toBe(false);
-    expect(Object.keys(MIGRATIONS)).toEqual([]);
+    expect(Object.keys(MIGRATIONS)).toEqual(['1']);
   });
 });
 

@@ -258,10 +258,11 @@ export class ImpactRings {
     }
   }
 
-  emit(x: number, y: number, z: number, intensity: number): void {
+  emit(x: number, y: number, z: number, intensity: number, color = 0xffd27a): void {
     const i = this.next;
     this.next = (this.next + 1) % MAX_RINGS;
     const m = this.meshes[i]!;
+    (m.material as THREE.MeshBasicMaterial).color.setHex(color);
     m.position.set(x, y + 0.02, z);
     m.visible = true;
     this.life[i] = 0.3;

@@ -74,4 +74,8 @@ export const RNG_STREAM = {
   floor: 0xf100c,
   /** v0.4.1: per-top contact wander frequencies / phases. */
   wander: 0x3a9de,
+  /** v0.5: tactical AI decisions (keyed by slot and tick). */
+  aiTactics: 0x7ac71c,
+  /** v0.5: AI launch aim per difficulty. */
+  aiAimV05: 0xa1a05,
 } as const;

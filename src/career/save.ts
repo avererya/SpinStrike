@@ -23,9 +23,13 @@ import {
 } from './config';
 import type { RankState } from './progression';
 import { clampAim, isAim, type LaunchAim } from '../sim/launchGeometry';
-import { emptyTopStats, int, sanitizeTopStats, type TopStats } from './history';
+import { emptyTacticalLifetime, emptyTopStats, int, sanitizeTopStats, type TopStats } from './history';
 
-export const SAVE_SCHEMA_VERSION = 1;
+/**
+ * Schema history: 1 = v0.4.0 / v0.4.1; 2 = v0.5.0 (lifetime tactical
+ * statistics per owned top; battle records may carry tactical usage).
+ */
+export const SAVE_SCHEMA_VERSION = 2;
 export const SAVE_FORMAT = 'spinstrike-career';
 
 /** One owned top (an INSTANCE of a top definition). */
@@ -112,7 +116,21 @@ export function createCareer(opts: { starterId: string; careerId: string; topIns
 // -------------------------------------------------------------- migration
 /** Migration from schema N to N+1, keyed by N. Add entries when the schema changes. */
 export type Migration = (raw: Record<string, unknown>) => Record<string, unknown>;
-export const MIGRATIONS: Readonly<Record<number, Migration>> = {};
+export const MIGRATIONS: Readonly<Record<number, Migration>> = {
+  /**
+   * 1 → 2 (v0.5.0): every owned top gets empty lifetime tactical statistics.
+   * Old battle records are kept exactly as they are: nothing is back-filled,
+   * because no tactical data existed before v0.5.
+   */
+  1: (raw) => ({
+    ...raw,
+    tops: Array.isArray(raw.tops)
+      ? raw.tops.map((t) =>
+          isObj(t) ? { ...t, stats: isObj(t.stats) ? { ...t.stats, tactics: isObj(t.stats.tactics) ? t.stats.tactics : emptyTacticalLifetime() } : t.stats } : t,
+        )
+      : raw.tops,
+  }),
+};
 
 export type MigrateResult = { ok: true; raw: Record<string, unknown>; from: number } | { ok: false; error: string; newer?: boolean };
 

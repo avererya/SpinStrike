@@ -1,6 +1,8 @@
 import { STARTER_TOPS, getTop } from '../content/tops';
 import {
   AI_LAUNCH_PARAMS,
+  BOOST_PARAMS,
+  BRACE_PARAMS,
   COLLISION_PARAMS,
   COMBAT_PARAMS,
   LAUNCH_BONUS_PARAMS,
@@ -14,13 +16,14 @@ import {
   TOP_PARAMS,
   type ParamSpec,
 } from '../config/params';
-import { defaultConfig, legacyV02Config, legacyV040Config, resolveTopCombat, resolveTopParams, type FixedQuality, type SandboxConfig } from '../config/sandboxConfig';
+import { TACTICAL_CONTROLLERS, defaultTacticalConfig, legacyV02Config, sandboxDefaultConfig, type TacticalSlotConfig, legacyV040Config, resolveTopCombat, resolveTopParams, type FixedQuality, type SandboxConfig } from '../config/sandboxConfig';
 import { RULESETS, type Ruleset } from '../content/derive';
 import { LAUNCH_QUALITIES, LAUNCH_QUALITY_LABEL, type LaunchQuality } from '../sim/launch';
 import { BUILD_ID, BUILD_TIME, VERSION_LABEL } from '../version';
 import { parseConfigJson } from '../config/validate';
 import type { DebugFlags } from '../render/debugDraw';
 import { el } from './dom';
+import { DIFFICULTIES, DIFFICULTY_LABEL, type Difficulty } from '../ai/difficulty';
 import { AIM_LIMITS, DEFAULT_AI_AIM, DEFAULT_AIM, aiAim } from '../sim/launchGeometry';
 
 export interface DevPanelCallbacks {
@@ -88,7 +91,7 @@ export class DevPanel {
     const L = config.launch;
     const ruleset = this.select(
       'Ruleset (stats & stat → physics mapping)',
-      RULESETS.map((r) => ({ value: r, label: r === 'v0.2' ? 'v0.2 legacy' : r === 'v0.3' ? 'v0.3 / v0.4.0 baseline' : `${r} (current)` })),
+      RULESETS.map((r) => ({ value: r, label: r === 'v0.2' ? 'v0.2 legacy' : r === 'v0.3' ? 'v0.3 / v0.4.0 baseline' : r === 'v0.4.1' ? 'v0.4.1 (Speed upgrades widen the drive)' : `${r} (current)` })),
       config.ruleset,
       (v) => {
         config.ruleset = v as Ruleset;
@@ -114,6 +117,7 @@ export class DevPanel {
       this.flash('v0.4.0 baseline configuration loaded.');
     });
     b.append(this.section('Ruleset', [ruleset, el('div', { class: 'btn-row' }, [v040Btn, legacyBtn])]));
+    b.append(this.section('Tactical abilities (v0.5)', this.tacticalControls()));
     b.append(this.section('Movement variation & launch aim (v0.4.1)', this.movementControls()));
     const qOptions = (auto: string) => [
       { value: 'auto', label: auto },
@@ -228,7 +232,7 @@ export class DevPanel {
     // Config management
     const resetAll = el('button', { class: 'btn', text: 'Reset all to defaults' });
     resetAll.addEventListener('click', () => {
-      const d = defaultConfig(this.config.seed);
+      const d = sandboxDefaultConfig(this.config.seed);
       d.player.topId = this.config.player.topId;
       d.opponent.topId = this.config.opponent.topId;
       this.config = d;
@@ -257,6 +261,51 @@ export class DevPanel {
         this.messages,
       ]),
     );
+  }
+
+  private tacticalControls(): Node[] {
+    const T = this.config.tactical;
+    const rows: Node[] = [
+      el('p', { class: 'dev-note', text: 'Directional Boost and Defensive Brace. Off = v0.4.1 passive combat (identical results). The battle validates every command; "player" = live input (touch / mouse / keys).' }),
+      this.checkbox('Tactical abilities on', T.enabled, (v) => {
+        T.enabled = v;
+        this.commit();
+      }),
+    ];
+    if (!T.enabled) return rows;
+    const ctrlLabel: Record<string, string> = { player: 'Player (live input)', ai: 'AI', passive: 'Passive (no abilities)' };
+    const side = (label: string, slot: TacticalSlotConfig) => [
+      this.select(`${label} controller`, TACTICAL_CONTROLLERS.map((c) => ({ value: c, label: ctrlLabel[c] ?? c })), slot.controller, (v) => {
+        slot.controller = v as TacticalSlotConfig['controller'];
+        this.commit();
+      }),
+      ...(slot.controller === 'ai'
+        ? [this.select(`${label} AI difficulty`, DIFFICULTIES.map((d) => ({ value: d, label: DIFFICULTY_LABEL[d] })), slot.difficulty, (v) => {
+            slot.difficulty = v as Difficulty;
+            this.commit();
+          })]
+        : []),
+    ];
+    rows.push(...side('Player slot', T.player), ...side('Opponent slot', T.opponent));
+    const aiVsAi = el('button', { class: 'btn small', text: 'AI vs AI (Expert vs Hard)' });
+    aiVsAi.addEventListener('click', () => {
+      T.player = { controller: 'ai', difficulty: 'expert' };
+      T.opponent = { controller: 'ai', difficulty: 'hard' };
+      this.commit();
+    });
+    const reset = el('button', { class: 'btn small', text: 'Reset tactics' });
+    reset.addEventListener('click', () => {
+      this.config.tactical = defaultTacticalConfig();
+      this.commit();
+    });
+    rows.push(el('div', { class: 'btn-row' }, [aiVsAi, reset]));
+    rows.push(el('p', { class: 'dev-note', text: 'Boost' }), ...BOOST_PARAMS.map((sp) => this.slider(sp, T.boost[sp.key], (v) => {
+      T.boost[sp.key] = sp.step >= 1 ? Math.round(v) : v;
+      if (T.boost.minStrength > T.boost.maxStrength) T.boost.maxStrength = T.boost.minStrength;
+    })));
+    rows.push(el('p', { class: 'dev-note', text: 'Brace' }), ...BRACE_PARAMS.map((sp) => this.slider(sp, T.brace[sp.key], (v) => (T.brace[sp.key] = sp.step >= 1 ? Math.round(v) : v))));
+    rows.push(el('p', { class: 'dev-note', text: `Scripted commands: ${T.script.length}. Add them in exported JSON as "tactical.script": [{ "tick": 480, "slot": 0, "ability": "boost", "dirX": 1, "dirY": 0, "strength": 1 }, …] (ticks at 240 Hz) and import.` }));
+    return rows;
   }
 
   private movementControls(): Node[] {

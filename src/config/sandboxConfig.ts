@@ -23,13 +23,60 @@ import type { GameplayStats } from '../content/stats';
 import type { CollisionParamKey, CombatParamKey, MovementParamKey, StadiumParamKey, TopOverrideKey } from './params';
 import { DEFAULT_AI_AIM, DEFAULT_AIM, DEFAULT_LAUNCH_VARIATION, aiAim, clampAim, type AiAimProfile, type LaunchAim } from '../sim/launchGeometry';
 import { RNG_STREAM, hashKey } from '../sim/rng';
+import { DEFAULT_BOOST, DEFAULT_BRACE, type BoostParams, type BraceParams, type TacticalCommand } from '../sim/tactics';
+import { TacticalAI } from '../ai/tacticalAi';
+import { DIFFICULTIES, type Difficulty } from '../ai/difficulty';
+import type { TacticalAgent } from '../sim/tactics';
 
 /**
  * Current configuration format.
  *   1 = SpinStrike v0.1, 2 = v0.2 (both migrated on import),
- *   3 = v0.3 – v0.4.0 (migrated: movement variability off), 4 = v0.4.1.
+ *   3 = v0.3 – v0.4.0 (migrated: movement variability off), 4 = v0.4.1
+ *   (migrated: tactical abilities off), 5 = v0.5.
  */
-export const CONFIG_VERSION = 4;
+export const CONFIG_VERSION = 5;
+
+/** Who controls a slot's tactical abilities. 'player' = live input (headless: none). */
+export type TacticalController = 'player' | 'ai' | 'passive';
+export const TACTICAL_CONTROLLERS: readonly TacticalController[] = ['player', 'ai', 'passive'];
+
+export interface TacticalSlotConfig {
+  controller: TacticalController;
+  /** AI difficulty (used when controller = 'ai'). */
+  difficulty: Difficulty;
+}
+
+/** v0.5 tactical abilities (Directional Boost, Defensive Brace). */
+export interface TacticalConfig {
+  enabled: boolean;
+  boost: BoostParams;
+  brace: BraceParams;
+  player: TacticalSlotConfig;
+  opponent: TacticalSlotConfig;
+  /** Fixed command sequence applied at each command's tick (reproducible experiments). */
+  script: TacticalCommand[];
+}
+
+/** Tactical abilities OFF (the v0.4.1 game): the engine default and every migrated older file. */
+export function passiveTacticalConfig(): TacticalConfig {
+  return {
+    enabled: false,
+    boost: { ...DEFAULT_BOOST },
+    brace: { ...DEFAULT_BRACE },
+    player: { controller: 'player', difficulty: 'normal' },
+    opponent: { controller: 'ai', difficulty: 'normal' },
+    script: [],
+  };
+}
+
+/** v0.5 default tactical setup: abilities on, the player controls slot 0, a Normal AI slot 1. */
+export function defaultTacticalConfig(): TacticalConfig {
+  return { ...passiveTacticalConfig(), enabled: true };
+}
+
+export function isDifficulty(v: unknown): v is Difficulty {
+  return typeof v === 'string' && (DIFFICULTIES as readonly string[]).includes(v);
+}
 
 export type TopOverrides = Partial<Record<TopOverrideKey, number>>;
 
@@ -129,6 +176,8 @@ export interface SandboxConfig {
   presentation: PresentationConfig;
   player: TopSlotConfig;
   opponent: TopSlotConfig;
+  /** v0.5 tactical abilities. */
+  tactical: TacticalConfig;
 }
 
 export function combatConfigFrom(c: CombatParams): SandboxConfig['combat'] {
@@ -232,7 +281,18 @@ export function defaultConfig(seed = 1): SandboxConfig {
     presentation: { cinematicFinishes: true, damageNumbers: false, criticalEffects: true },
     player: { topId: STARTER_TOPS[0]!.id, overrides: {} },
     opponent: { topId: STARTER_TOPS[1]!.id, overrides: {} },
+    // The engine default stays passive (v0.4.1 combat) so every headless
+    // regression path is unchanged; career battles and the sandbox opt in
+    // through sandboxDefaultConfig / buildCareerConfig.
+    tactical: passiveTacticalConfig(),
   };
+}
+
+/** The sandbox's starting configuration (v0.5): default rules with tactical abilities on. */
+export function sandboxDefaultConfig(seed = 1): SandboxConfig {
+  const c = defaultConfig(seed);
+  c.tactical = defaultTacticalConfig();
+  return c;
 }
 
 /**
@@ -343,7 +403,20 @@ export function buildBattleOptions(c: SandboxConfig, launches?: readonly TopLaun
   const mv = c.movement;
   const scaleWander = (p: TopPhysicsParams): TopPhysicsParams =>
     mv.naturalVariation ? { ...p, contactWander: (p.contactWander ?? 0) * mv.contactWanderScale } : { ...p, contactWander: 0 };
+  const tc = c.tactical;
+  const tacticsOn = !!tc?.enabled;
+  const agents: (TacticalAgent | null)[] = tacticsOn
+    ? ([tc.player, tc.opponent] as const).map((slot, i) => {
+        if (slot.controller !== 'ai') return null;
+        const me = getTop(i === 0 ? c.player.topId : c.opponent.topId);
+        const them = getTop(i === 0 ? c.opponent.topId : c.player.topId);
+        return new TacticalAI({ difficulty: slot.difficulty, seed: c.seed, slot: i, selfClass: me.topClass, opponentClass: them.topClass, profile: me.tacticalProfile });
+      })
+    : [];
   return {
+    tactics: tacticsOn ? { enabled: true, boost: { ...tc.boost }, brace: { ...tc.brace } } : undefined,
+    agents,
+    script: tacticsOn && tc.script.length ? tc.script : undefined,
     stadium,
     tops: [scaleWander(resolveTopParams(c.player, c.ruleset)), scaleWander(resolveTopParams(c.opponent, c.ruleset))],
     aims: resolveAims(c),

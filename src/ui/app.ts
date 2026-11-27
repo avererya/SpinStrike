@@ -2,7 +2,7 @@ import { Battle } from '../sim/battle';
 import { FixedStepRunner, SIM_SPEEDS } from '../sim/runner';
 import { randomSeed } from '../sim/rng';
 import { getTop, type TopDefinition } from '../content/tops';
-import { autoLaunches, buildBattleOptions, cloneConfig, defaultConfig, rematchConfig, type SandboxConfig } from '../config/sandboxConfig';
+import { autoLaunches, buildBattleOptions, cloneConfig, rematchConfig, sandboxDefaultConfig, type SandboxConfig } from '../config/sandboxConfig';
 import { SceneRenderer } from '../render/sceneRenderer';
 import { DEFAULT_DEBUG_FLAGS, type DebugFlags } from '../render/debugDraw';
 import { DevPanel, TOP_OPTIONS } from './devPanel';
@@ -16,6 +16,35 @@ import type { BattleResult } from '../sim/battle';
 import type { CareerBattleSetup } from '../career/battle';
 import { AimPanel } from './aimPanel';
 import type { LaunchAim } from '../sim/launchGeometry';
+import { AimArrow, REJECT_TEXT, TacticalBar, TacticalHelp, costPercent, gestureStrength, type AimState } from './tacticalUi';
+import type { AbilityRequest, TacticalCommand } from '../sim/tactics';
+
+/** localStorage key remembering that the tactical tutorial was seen (v0.5). */
+export const TUTORIAL_KEY = 'spinstrike.tutorial.v1';
+/** Keyboard boost: seconds of holding an arrow key to reach full strength. */
+const KEY_AIM_FULL = 0.9;
+const KEY_DIRS: Record<string, readonly [number, number]> = {
+  ArrowUp: [0, -1],
+  ArrowDown: [0, 1],
+  ArrowLeft: [-1, 0],
+  ArrowRight: [1, 0],
+};
+
+function tutorialSeen(): boolean {
+  try {
+    return localStorage.getItem(TUTORIAL_KEY) === '1';
+  } catch {
+    return true;
+  }
+}
+
+function markTutorialSeen(): void {
+  try {
+    localStorage.setItem(TUTORIAL_KEY, '1');
+  } catch {
+    /* storage unavailable: the tutorial simply shows again next time */
+  }
+}
 
 /**
  * Hooks of a career battle (v0.4). The stage knows nothing about rewards:
@@ -71,7 +100,17 @@ type Status = 'ready' | 'aiming' | 'launching' | 'running' | 'paused' | 'finishe
  *     recorded launch qualities, so the outcome is identical.
  */
 export class SandboxApp {
-  private config: SandboxConfig = defaultConfig(randomSeed());
+  private config: SandboxConfig = sandboxDefaultConfig(randomSeed());
+  // v0.5 tactical input (presentation / input only; the battle validates every request).
+  private readonly tacBar: TacticalBar;
+  private readonly arrow = new AimArrow();
+  private readonly help = new TacticalHelp();
+  private aim: AimState | null = null;
+  private readonly keysHeld = new Set<string>();
+  private keyAimClock = 0;
+  /** One-shot: the recorded human commands an exact replay re-applies (watch-only). */
+  private pendingReplay: TacticalCommand[] | null = null;
+  private replaying = false;
   private battle!: Battle;
   private runner!: FixedStepRunner;
   private renderer!: SceneRenderer;
@@ -252,9 +291,11 @@ export class SandboxApp {
       if (c) c.hooks.onExit(false);
     });
 
+    this.tacBar = new TacticalBar(() => this.pressBrace(), () => this.openHelp());
     this.stats = el('pre', { class: 'stats' });
     this.errorBox = el('div', { class: 'error-box' });
-    this.stage = el('main', { class: 'stage' }, [this.canvas, this.dmgLayer, this.hud.root, this.banner, this.aimPanel.root, this.launchBox, this.result, this.quitBox, this.stats, this.errorBox]);
+    this.stage = el('main', { class: 'stage' }, [this.canvas, this.dmgLayer, this.hud.root, this.banner, this.aimPanel.root, this.arrow.root, this.tacBar.root, this.launchBox, this.result, this.quitBox, this.help.root, this.stats, this.errorBox]);
+    this.installTacticalInput();
 
     this.dev = new DevPanel({
       onConfigChange: (c) => {
@@ -290,6 +331,14 @@ export class SandboxApp {
     window.addEventListener('keydown', (e) => {
       if ((e.target as HTMLElement).closest('input, textarea, select')) return;
       if (!this.active) return;
+      if (this.help.open) {
+        if (e.key === 'Escape' || e.key === 'Enter' || e.code === 'Space') {
+          e.preventDefault();
+          this.help.close();
+        }
+        return;
+      }
+      if (this.onTacticalKey(e, true)) return;
       if (e.code === 'Space') {
         e.preventDefault();
         if (e.repeat) return;
@@ -301,6 +350,18 @@ export class SandboxApp {
         else this.togglePause();
       } else if (e.key === 'r' && !this.career) this.replay();
     });
+    window.addEventListener('keyup', (e) => {
+      if (this.active) this.onTacticalKey(e, false);
+    });
+    window.addEventListener('blur', () => this.cancelAim());
+    document.addEventListener('visibilitychange', () => {
+      // Backgrounding: drop any half-made gesture and pause a running battle (simulation time stops).
+      if (document.visibilityState === 'hidden') {
+        this.cancelAim();
+        if (this.active && this.status === 'running') this.togglePause();
+      }
+    });
+    window.addEventListener('orientationchange', () => this.cancelAim());
     this.lastTime = performance.now();
     this.loopRunning = true;
     requestAnimationFrame(this.frame);
@@ -309,6 +370,7 @@ export class SandboxApp {
   /** Pauses rendering and simulation while the stage is not on screen (saves battery). */
   setActive(on: boolean): void {
     this.active = on;
+    if (!on) this.cancelAim();
     if (on && !this.loopRunning && this.renderer) {
       this.loopRunning = true;
       this.lastTime = performance.now();
@@ -356,7 +418,13 @@ export class SandboxApp {
    */
   rebuild(startNow: boolean, rerenderDev = true, launches?: readonly TopLaunch[]): void {
     const ls = launches ?? autoLaunches(this.config);
-    this.battle = new Battle(buildBattleOptions(this.config, ls));
+    const opts = buildBattleOptions(this.config, ls);
+    const replay = this.pendingReplay;
+    this.pendingReplay = null;
+    this.replaying = !!replay && !!opts.tactics?.enabled;
+    if (this.replaying) opts.script = [...(opts.script ?? []), ...replay!];
+    this.cancelAim();
+    this.battle = new Battle(opts);
     this.runner = new FixedStepRunner(this.battle);
     this.runner.speed = this.speed;
     this.runner.paused = !startNow;
@@ -366,6 +434,10 @@ export class SandboxApp {
     this.hud.setTops(defs, this.config.seed, mirror ? ['P1', 'P2'] : ['Player', 'Opponent']);
     this.hud.setLaunches(launches ?? null);
     this.hud.update(this.battle);
+    const tac = this.battle.world.tactics;
+    this.tacBar.setTotals(tac.boost.charges, tac.brace.charges);
+    this.root.classList.toggle('has-tactics', this.humanSlot() !== null);
+    this.updateTacticsUi();
     this.status = startNow ? 'running' : 'ready';
     this.resultShown = false;
     this.result.classList.remove('show', 'career');
@@ -419,6 +491,11 @@ export class SandboxApp {
       this.beginLaunch();
       return;
     }
+    // The recorded human ability commands are re-applied at their ticks (the AI
+    // re-decides identically), so the replay reproduces the battle exactly.
+    const last = this.battle.result?.tactical;
+    const human = this.humanSlot();
+    if (last && human !== null && this.battle.result?.seed === this.config.seed) this.pendingReplay = last.commands.filter((c) => c.slot === human);
     this.rebuild(true, true, ls ?? autoLaunches(this.config));
     this.recordLaunch(this.battle.launches);
   }
@@ -433,6 +510,12 @@ export class SandboxApp {
   }
 
   private beginLaunch(): void {
+    if (this.humanSlot() !== null && !tutorialSeen()) {
+      // First tactical battle: the short tutorial comes first (nothing is running yet).
+      markTutorialSeen();
+      this.help.show(() => this.beginLaunch());
+      return;
+    }
     if (this.needsAim()) {
       this.status = 'aiming';
       const defs = [getTop(this.config.player.topId), getTop(this.config.opponent.topId)];
@@ -540,6 +623,7 @@ export class SandboxApp {
   }
 
   private togglePause(): void {
+    this.cancelAim();
     if (this.status === 'running') {
       this.runner.paused = true;
       this.status = 'paused';
@@ -571,6 +655,7 @@ export class SandboxApp {
   }
 
   private resize(): void {
+    this.cancelAim();
     const r = this.canvas.getBoundingClientRect();
     this.renderer.resize(Math.max(1, Math.floor(r.width)), Math.max(1, Math.floor(r.height)));
   }
@@ -617,7 +702,18 @@ export class SandboxApp {
         if (showA) this.spawnDamageNumber(critA ? ev.x - ev.nx * 0.012 : bA.x, critA ? ev.y - ev.ny * 0.012 : bA.y, ev.damageToA, ev.a, critA);
       }
     }
-    if (this.battle.phase === 'finished' && this.finishClock < 0) this.finishClock = 0;
+    const tev = this.battle.world.drainTacticalEvents();
+    if (tev.length) {
+      this.renderer.onTactical(tev);
+      const h = this.humanSlot();
+      if (h !== null && tev.some((e) => e.slot === h && e.kind === 'boost')) navigator.vibrate?.(12);
+    }
+    if (this.battle.phase === 'finished' && this.finishClock < 0) {
+      this.finishClock = 0;
+      this.cancelAim();
+    }
+    this.updateKeyAim(dt);
+    this.drawAim();
     const effectDt = this.runner.paused ? 0 : dt * this.runner.speed;
     this.renderer.render(alpha, effectDt, this.flags);
 
@@ -625,6 +721,7 @@ export class SandboxApp {
     if (this.hudTimer > 1 / 15) {
       this.hudTimer = 0;
       this.hud.update(this.battle);
+      this.updateTacticsUi();
       if (this.flags.fps || this.flags.physicsStats) this.renderStats();
     }
     this.updateDamageNumbers(this.runner.paused ? 0 : dt);
@@ -733,6 +830,7 @@ export class SandboxApp {
     const row = (k: string, f: (i: number) => string) =>
       [el('span', { class: 'rk', text: k }), el('span', { text: f(0) }), el('span', { text: f(1) })];
     const head = [el('span'), ...[0, 1].map((i) => el('span', { class: 'rh', text: label(i), style: `color:${hex(defs[i]!.palette.accent)}` }))];
+    const tac = r.tactical?.enabled ? r.tactical : null;
     const s = r.strongestHit;
     const strongest = s.by >= 0 ? `${s.damage.toFixed(0)} by ${label(s.by)}${s.critical ? ' (critical hit)' : ''}` : 'none';
     this.resultTable.replaceChildren(
@@ -743,6 +841,13 @@ export class SandboxApp {
         ...row('Stamina left', (i) => formatStamina(r.tops[i]!.stamina)),
         ...row('Damage dealt', (i) => r.tops[i]!.damageDealt.toFixed(0)),
         ...row('Hits (crits)', (i) => `${r.tops[i]!.hitsLanded} (${r.tops[i]!.critsLanded})`),
+        ...(tac ? [
+          el('span', { class: 'rsec', text: 'Tactics' }),
+          ...row('Boosts used', (i) => `${tac.tops[i]!.boostsUsed} (${tac.tops[i]!.boostsLeft} left)`),
+          ...row('Braces used', (i) => `${tac.tops[i]!.bracesUsed} (${tac.tops[i]!.bracesLeft} left)`),
+          ...row('Boost → hit', (i) => (tac.tops[i]!.boostsUsed ? `${tac.tops[i]!.boostsToHit} of ${tac.tops[i]!.boostsUsed}` : '–')),
+          ...row('Damage prevented', (i) => tac.tops[i]!.damagePrevented.toFixed(0)),
+        ] : []),
       ]),
       el('details', { class: 'rmore' }, [
         el('summary', { text: 'More statistics' }),
@@ -753,6 +858,11 @@ export class SandboxApp {
           ...row('Damage taken', (i) => r.tops[i]!.damageReceived.toFixed(0)),
           ...row('Strongest hit', (i) => `${r.tops[i]!.strongestHit.toFixed(0)}${r.tops[i]!.strongestHitCritical ? ' crit' : ''}`),
           ...row('Collisions', (i) => String(r.tops[i]!.collisions)),
+          ...(tac ? [
+            ...row('Boost stamina spent', (i) => `${(tac.tops[i]!.boostCost * 100).toFixed(1)} %`),
+            ...row('Braced impacts', (i) => String(tac.tops[i]!.braceImpacts)),
+            ...row('Boost → knockout', (i) => (tac.tops[i]!.boostKnockout ? 'yes' : '–')),
+          ] : []),
         ]),
       ]),
       el('div', { class: 'rmeta' }, [`Strongest hit: ${strongest}`, el('br'), `Duration ${r.time.toFixed(2)} s · seed ${r.seed}`]),
@@ -784,6 +894,240 @@ export class SandboxApp {
     if (r.outcome.kind === 'draw') fresh.classList.add('rematch');
     this.resultButtons.replaceChildren(fresh, replay, close);
     this.result.classList.add('show');
+  }
+
+  // ── v0.5 tactical input ────────────────────────────────────────────────
+
+  /** The slot the person controls (first slot with controller 'player'), or null. Never during a replay. */
+  private humanSlot(): number | null {
+    const t = this.config.tactical;
+    if (!t?.enabled || this.replaying) return null;
+    if (t.player.controller === 'player') return 0;
+    if (t.opponent.controller === 'player') return 1;
+    return null;
+  }
+
+  private canAct(): boolean {
+    return this.status === 'running' && this.battle.phase === 'running' && !this.help.open && this.humanSlot() !== null;
+  }
+
+  private installTacticalInput(): void {
+    const c = this.canvas;
+    c.addEventListener('pointerdown', (e) => {
+      if (!this.canAct()) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      e.preventDefault();
+      if (this.aim) {
+        // A second finger cancels the gesture (pinch / accidental palm): nothing is consumed.
+        this.cancelAim('Boost cancelled');
+        return;
+      }
+      try {
+        c.setPointerCapture(e.pointerId);
+      } catch {
+        /* capture unsupported: moves still arrive while over the canvas */
+      }
+      const p = this.stagePoint(e);
+      this.aim = { pointerId: e.pointerId, startX: p.x, startY: p.y, curX: p.x, curY: p.y, source: 'pointer' };
+    });
+    c.addEventListener('pointermove', (e) => {
+      const a = this.aim;
+      if (!a || a.source !== 'pointer' || a.pointerId !== e.pointerId) return;
+      e.preventDefault();
+      const p = this.stagePoint(e);
+      a.curX = p.x;
+      a.curY = p.y;
+    });
+    c.addEventListener('pointerup', (e) => {
+      const a = this.aim;
+      if (!a || a.source !== 'pointer' || a.pointerId !== e.pointerId) return;
+      e.preventDefault();
+      const p = this.stagePoint(e);
+      a.curX = p.x;
+      a.curY = p.y;
+      this.releaseAim();
+    });
+    const cancel = (e: PointerEvent) => {
+      if (this.aim?.source === 'pointer' && this.aim.pointerId === e.pointerId) this.cancelAim();
+    };
+    c.addEventListener('pointercancel', cancel);
+    c.addEventListener('lostpointercapture', cancel);
+    // Belt and braces against page scroll / zoom while aiming on touch screens.
+    c.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+    c.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
+  /** Pointer position in stage CSS px. */
+  private stagePoint(e: PointerEvent): { x: number; y: number } {
+    const r = this.stage.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  /** Drops the current gesture. Nothing is consumed. */
+  private cancelAim(message?: string): void {
+    if (!this.aim) return;
+    const a = this.aim;
+    this.aim = null;
+    this.keysHeld.clear();
+    if (a.source === 'pointer') {
+      try {
+        if (this.canvas.hasPointerCapture(a.pointerId)) this.canvas.releasePointerCapture(a.pointerId);
+      } catch {
+        /* ignore */
+      }
+    }
+    this.arrow.hide();
+    if (message) this.tacBar.flash(message);
+  }
+
+  /** Current aim as (screen direction, strength). Strength 0 = below the dead zone. */
+  private aimVector(): { ux: number; uy: number; strength: number } | null {
+    const a = this.aim;
+    if (!a) return null;
+    const b = this.battle.world.tactics.boost;
+    const dx = a.curX - a.startX;
+    const dy = a.curY - a.startY;
+    const len = Math.hypot(dx, dy);
+    if (a.source === 'keys') {
+      if (len < 1e-9) return { ux: 0, uy: -1, strength: 0 };
+      const u = Math.min(1, this.keyAimClock / KEY_AIM_FULL);
+      return { ux: dx / len, uy: dy / len, strength: b.minStrength + (b.maxStrength - b.minStrength) * u };
+    }
+    const strength = gestureStrength(len, this.renderer.stadiumScreenDiameter(), b);
+    return len > 1e-9 ? { ux: dx / len, uy: dy / len, strength } : { ux: 0, uy: -1, strength: 0 };
+  }
+
+  /** Release: validate again and submit, or cancel a too-short drag without consuming anything. */
+  private releaseAim(): void {
+    const v = this.aimVector();
+    const slot = this.humanSlot();
+    const wasKeys = this.aim?.source === 'keys';
+    this.cancelAim();
+    if (!v || slot === null) return;
+    if (!this.canAct()) return;
+    if (v.strength <= 0) {
+      this.tacBar.flash(wasKeys ? 'Hold an arrow key to aim' : REJECT_TEXT.strength);
+      return;
+    }
+    const me = this.battle.world.bodies[slot]!;
+    const dir = this.renderer.screenToWorldDir(me.x, me.y, v.ux, v.uy);
+    if (!dir) return;
+    this.submit(slot, { ability: 'boost', dirX: dir.x, dirY: dir.y, strength: v.strength });
+  }
+
+  private submit(slot: number, req: AbilityRequest): void {
+    const r = this.battle.submit(slot, req);
+    if (!r.ok) this.tacBar.flash(REJECT_TEXT[r.reason]);
+    this.updateTacticsUi();
+  }
+
+  private pressBrace(): void {
+    const slot = this.humanSlot();
+    if (slot === null || !this.canAct()) return;
+    this.submit(slot, { ability: 'brace' });
+  }
+
+  /** The ? control: pauses a running battle while the help is open. */
+  private openHelp(): void {
+    if (this.help.open) return;
+    const resume = this.status === 'running';
+    if (resume) this.togglePause();
+    this.help.show(() => {
+      if (resume && this.status === 'paused') this.togglePause();
+    });
+  }
+
+  /** Keyboard: B / Shift = Brace; hold arrow keys to aim a boost, release them all to fire; Escape cancels. */
+  private onTacticalKey(e: KeyboardEvent, down: boolean): boolean {
+    if (this.humanSlot() === null) return false;
+    if (down && (e.key === 'b' || e.key === 'B' || e.key === 'Shift')) {
+      if (e.repeat) return true;
+      e.preventDefault();
+      this.pressBrace();
+      return true;
+    }
+    if (e.key === 'Escape' && down && this.aim) {
+      e.preventDefault();
+      this.cancelAim('Boost cancelled');
+      return true;
+    }
+    if (!(e.key in KEY_DIRS)) return false;
+    e.preventDefault();
+    if (down) {
+      if (e.repeat) return true;
+      if (!this.canAct()) return true;
+      if (this.aim && this.aim.source !== 'keys') return true;
+      if (!this.aim) {
+        this.aim = { pointerId: -1, startX: 0, startY: 0, curX: 0, curY: 0, source: 'keys' };
+        this.keyAimClock = 0;
+      }
+      this.keysHeld.add(e.key);
+      this.updateKeyAim(0);
+    } else if (this.aim?.source === 'keys') {
+      const before = this.aim;
+      this.updateKeyAim(0);
+      this.keysHeld.delete(e.key);
+      if (this.keysHeld.size === 0) {
+        // Release with the direction that was held (curX/curY still hold it).
+        this.aim = before;
+        this.releaseAim();
+      } else this.updateKeyAim(0);
+    }
+    return true;
+  }
+
+  /** Keyboard aim: direction = sum of the held arrows; strength grows while held (real time). */
+  private updateKeyAim(dt: number): void {
+    const a = this.aim;
+    if (!a || a.source !== 'keys') return;
+    if (!this.runner.paused) this.keyAimClock += dt;
+    let x = 0;
+    let y = 0;
+    for (const k of this.keysHeld) {
+      const d = KEY_DIRS[k];
+      if (d) {
+        x += d[0];
+        y += d[1];
+      }
+    }
+    if (x !== 0 || y !== 0) {
+      a.curX = x * 100;
+      a.curY = y * 100;
+    }
+  }
+
+  /** Draws the Boost arrow from the person's top (presentation only). */
+  private drawAim(): void {
+    const v = this.aimVector();
+    const slot = this.humanSlot();
+    if (!v || slot === null || !this.canAct()) {
+      if (this.aim && !this.canAct()) this.cancelAim();
+      this.arrow.hide();
+      return;
+    }
+    const me = this.battle.world.bodies[slot]!;
+    const p = this.renderer.project(me.x, me.y, 0.03);
+    if (!p) return;
+    const b = this.battle.world.tactics.boost;
+    const pct = costPercent(b, v.strength);
+    const text = v.strength > 0 ? `${Math.round(v.strength * 100)}% · −${pct.toFixed(1)}%` : 'drag further';
+    const diameter = this.renderer.stadiumScreenDiameter();
+    this.arrow.draw(p.x + this.canvas.offsetLeft, p.y + this.canvas.offsetTop, v.ux, v.uy, v.strength, text, Math.max(60, diameter * 0.32));
+  }
+
+  /** Bar + HUD chips (both sides' charges and BRACED tags). */
+  private updateTacticsUi(): void {
+    const w = this.battle.world;
+    const tac = w.tactics;
+    const running = this.status === 'running' && this.battle.phase === 'running';
+    const views = tac.enabled ? [w.abilityView(0, running), w.abilityView(1, running)] : null;
+    this.hud.updateTactics(views, { boost: tac.boost.charges, brace: tac.brace.charges });
+    const slot = this.humanSlot();
+    if (slot === null || !views) return;
+    const v = views[slot]!;
+    const av = this.aimVector();
+    this.tacBar.update(v, av ? { strength: av.strength, costPct: costPercent(tac.boost, av.strength) } : null);
+    if (v.braceActive) this.tacBar.setBraceFraction(v.braceRemaining / tac.brace.duration);
   }
 
   private topSelect(label: string): HTMLSelectElement {

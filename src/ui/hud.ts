@@ -3,6 +3,8 @@ import type { TopDefinition } from '../content/tops';
 import { el, hex } from './dom';
 import { formatBonus, formatHealth, formatStamina } from './format';
 import { LAUNCH_QUALITY_LABEL, type TopLaunch } from '../sim/launch';
+import type { AbilityView } from '../sim/tactics';
+import { abilityChipText } from './tacticalUi';
 
 const RAD_TO_RPM = 60 / (2 * Math.PI);
 
@@ -19,7 +21,10 @@ interface Card {
   spin: HTMLElement;
   status: HTMLElement;
   launch: HTMLElement;
+  tac: HTMLElement;
+  braced: HTMLElement;
   last: string;
+  lastTac: string;
 }
 
 /**
@@ -62,6 +67,8 @@ export class Hud {
       const spin = el('span', { class: 'v', text: '0' });
       const status = el('span', { class: 'status' });
       const launch = el('span', { class: 'launch-chip', title: 'Launch quality and starting spin-energy bonus' });
+      const tac = el('span', { class: 'tac-chip', title: 'Remaining Boost and Brace charges' });
+      const braced = el('span', { class: 'braced-tag', text: 'BRACED' });
       const root = el('div', { class: `hud-card side-${i}` }, [
         el('div', { class: 'hud-head' }, [
           el('span', { class: 'swatch', style: `background:${hex(d.palette.primary)};box-shadow:0 0 0 2px ${hex(d.palette.accent)}` }),
@@ -70,6 +77,7 @@ export class Hud {
           el('span', { class: 'who', text: labels[i] ?? '' }),
         ]),
         launch,
+        el('div', { class: 'tac-row' }, [tac, braced]),
         el('div', { class: 'bar hp-bar', role: 'meter', 'aria-label': `${d.name} health` }, [
           hpFill,
           el('span', { class: 'bar-icon', text: '✚' }),
@@ -100,7 +108,7 @@ export class Hud {
       ]);
       if (i === 0) this.root.prepend(root);
       else this.root.append(root);
-      return { root, hpFill, hpText, stFill, stText, hits, dealt, taken, speed, spin, status, launch, last: '' };
+      return { root, hpFill, hpText, stFill, stText, hits, dealt, taken, speed, spin, status, launch, tac, braced, last: '', lastTac: '' };
     });
     this.seed.textContent = `seed ${seed}`;
   }
@@ -111,6 +119,20 @@ export class Hud {
       const l = launches?.[i];
       c.launch.textContent = l ? `${LAUNCH_QUALITY_LABEL[l.quality]} launch · ${formatBonus(l.energyMultiplier)} spin energy` : '';
       c.launch.className = `launch-chip${l ? ` q-${l.quality}` : ''}`;
+    });
+  }
+
+  /** v0.5: shows each side's remaining Boost / Brace charges and an active-Brace tag (null = abilities off). */
+  updateTactics(views: readonly (AbilityView | null)[] | null, totals: { boost: number; brace: number }): void {
+    this.root.classList.toggle('tactical', !!views);
+    this.cards.forEach((c, i) => {
+      const v = views?.[i];
+      const text = v ? abilityChipText(v, totals) : '';
+      if (text !== c.lastTac) {
+        c.tac.textContent = text;
+        c.lastTac = text;
+      }
+      c.root.classList.toggle('braced', !!v?.braceActive);
     });
   }
 

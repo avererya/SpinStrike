@@ -3,6 +3,8 @@ import type { FinishKind } from './combat';
 import type { TopBody } from './body';
 import type { TopLaunch } from './launch';
 import { clampAim, type LaunchAim } from './launchGeometry';
+import { ATTRIBUTION, type AbilityRequest, type TacticalAgent, type TacticalCommand, type TacticalSummary, type Validation } from './tactics';
+import { observe } from './observation';
 
 /**
  * Battle phases:
@@ -74,6 +76,8 @@ export interface BattleResult {
   readonly drawWindow: DrawWindowInfo | null;
   /** v0.4.1: launch aim of each top (null under the v0.4.0 launch model, which has no aim). */
   readonly aims: readonly LaunchAim[] | null;
+  /** v0.5: tactical ability usage and the replayable command log (null when abilities are off). */
+  readonly tactical: TacticalSummary | null;
 }
 
 export interface BattleOptions extends WorldOptions {
@@ -88,6 +92,10 @@ export interface BattleOptions extends WorldOptions {
   narrowThreshold?: number;
   /** Launch record of each top (recorded in the result for exact replays). */
   launches?: readonly TopLaunch[];
+  /** v0.5: tactical agents per slot (AI); null/undefined = no automatic decisions for that slot. */
+  agents?: readonly (TacticalAgent | null | undefined)[];
+  /** v0.5: fixed command sequence (replays, reproducible sandbox tests). Applied at each command's tick. */
+  script?: readonly TacticalCommand[];
 }
 
 /**
@@ -146,9 +154,14 @@ export class Battle {
   phase: BattlePhase = 'running';
   result: BattleResult | null = null;
   private pending: { loser: number; step: number; time: number; tops: TopResultStats[] } | null = null;
+  private readonly script: readonly TacticalCommand[];
+  private scriptAt = 0;
+  private readonly agents: readonly (TacticalAgent | null | undefined)[];
 
   constructor(readonly options: BattleOptions) {
     this.world = new World(options);
+    this.script = [...(options.script ?? [])].filter((c) => Number.isInteger(c.tick) && c.tick >= 0).sort((a, b) => a.tick - b.tick);
+    this.agents = options.agents ?? [];
     this.maxDuration = options.maxDuration;
     this.windowSteps = drawWindowSteps(options.drawWindow ?? 0, options.stepHz);
     this.narrowThreshold = Math.max(0, options.narrowThreshold ?? 0.02);
@@ -163,6 +176,7 @@ export class Battle {
     if (this.phase === 'finished') return false;
     if (this.phase === 'resolving') return this.stepResolving();
     const w = this.world;
+    if (w.tactics.enabled) this.runTactics();
     w.step();
     const finishes = w.bodies.map(finishOf);
     const out = finishes.filter((f) => f !== null).length;
@@ -192,6 +206,29 @@ export class Battle {
       return false;
     }
     return true;
+  }
+
+  /** Applies scripted commands and agent decisions due on the current tick (before the physics step). */
+  private runTactics(): void {
+    const w = this.world;
+    const t = w.steps;
+    while (this.scriptAt < this.script.length && this.script[this.scriptAt]!.tick < t) this.scriptAt++;
+    while (this.scriptAt < this.script.length && this.script[this.scriptAt]!.tick === t) w.applyCommand(this.script[this.scriptAt++]!, true);
+    for (let slot = 0; slot < this.agents.length; slot++) {
+      const a = this.agents[slot];
+      if (!a || !w.bodies[slot]) continue;
+      const reqs = a.tick(t, () => observe(w, slot));
+      if (reqs) for (const r of reqs) w.applyCommand({ ...r, tick: t, slot }, true);
+    }
+  }
+
+  /**
+   * Live input (the player): validates and applies an ability on the current
+   * tick. Rejected while not in normal combat (resolving, finished), and the
+   * caller must not submit while paused. Returns the validation result.
+   */
+  submit(slot: number, req: AbilityRequest): Validation {
+    return this.world.applyCommand({ ...req, tick: this.world.steps, slot }, this.phase === 'running');
   }
 
   private stepResolving(): boolean {
@@ -282,6 +319,43 @@ export class Battle {
       launches: this.launches,
       drawWindow: dw ? Object.freeze(dw) : null,
       aims: this.options.launch.variation ? Object.freeze(this.world.bodies.map((b) => Object.freeze(clampAim(this.options.aims?.[b.index])))) : null,
+      tactical: w.tactics.enabled ? this.tacticalSummary(outcome) : null,
+    });
+  }
+
+  private tacticalSummary(outcome: BattleOutcome): TacticalSummary {
+    const w = this.world;
+    const hz = w.stepHz;
+    const hits = w.telemetry.hitSteps;
+    return Object.freeze({
+      enabled: true,
+      commands: Object.freeze([...w.commandLog]),
+      tops: Object.freeze(
+        w.abilities.map((st, i) => {
+          let ko = false;
+          if (outcome.kind === 'win' && outcome.winner === i && outcome.finish === 'knockout') {
+            const koStep = w.bodies[outcome.loser]!.eliminatedStep - 1;
+            const b0 = st.lastBoostTick;
+            ko = koStep - b0 >= 0 && koStep - b0 <= ATTRIBUTION.boostToKnockout * hz && hits.some((h) => h >= b0 && h <= koStep);
+          }
+          return Object.freeze({
+            boostsUsed: st.boostsUsed,
+            bracesUsed: st.bracesUsed,
+            boostsLeft: st.boostCharges,
+            bracesLeft: st.braceCharges,
+            boostEnergy: st.boostEnergy,
+            boostCost: st.boostCostFraction,
+            avgStrength: st.boostsUsed > 0 ? st.boostStrengthSum / st.boostsUsed : 0,
+            braceImpacts: st.braceImpacts,
+            damagePrevented: st.damagePrevented,
+            boostsToHit: st.boostsToHit,
+            boostKnockout: ko,
+            boostTimes: Object.freeze(st.boostTicks.map((t) => t / hz)),
+            braceTimes: Object.freeze(st.braceTicks.map((t) => t / hz)),
+            rejected: Object.freeze({ ...st.rejected }),
+          });
+        }),
+      ),
     });
   }
 

@@ -20,11 +20,13 @@ import {
   type Rarity,
   type UpgradeRanks,
   type UpgradeStat,
+  UPGRADE_BONUS_BASIS,
+  type UpgradeBonusBasis,
 } from './config';
 import { BASE_CRIT_CHANCE } from '../sim/combat';
 import { DEFAULT_RULESET, baseStats, type Ruleset } from '../content/derive';
 import type { GameplayStats } from '../content/stats';
-import type { TopDefinition } from '../content/tops';
+import { STARTER_TOPS, type TopDefinition } from '../content/tops';
 
 /** Round-half-up of a non-negative integer ratio a / b without float error. */
 export function divRound(a: number, b: number): number {
@@ -128,9 +130,21 @@ const round3 = (v: number) => Math.round(v * 1000) / 1000;
  * points per rank on the 5 % base. Rank 0 returns the unmodified v0.3.1
  * base stats, so an unupgraded top is identical to the sandbox starter.
  */
-export function effectiveStats(def: TopDefinition, ranks: UpgradeRanks, ruleset: Ruleset = DEFAULT_RULESET): EffectiveStats {
+/** Roster-average base stats (the four starters) under a ruleset: the 'reference' upgrade basis. */
+export function upgradeReferenceStats(ruleset: Ruleset = DEFAULT_RULESET): Record<Exclude<UpgradeStat, 'critChance'>, number> {
+  const keys = ['health', 'attack', 'defense', 'stamina', 'speed'] as const;
+  const out = { health: 0, attack: 0, defense: 0, stamina: 0, speed: 0 };
+  for (const t of STARTER_TOPS) {
+    const b = baseStats(t, ruleset);
+    for (const k of keys) out[k] += b[k] / STARTER_TOPS.length;
+  }
+  return out;
+}
+
+export function effectiveStats(def: TopDefinition, ranks: UpgradeRanks, ruleset: Ruleset = DEFAULT_RULESET, basis: UpgradeBonusBasis = UPGRADE_BONUS_BASIS): EffectiveStats {
   const b = baseStats(def, ruleset);
-  const f = (stat: Exclude<UpgradeStat, 'critChance'>) => round3(b[stat] * (1 + (MAX_RANK_BONUS[stat] * clampRank(ranks[stat])) / MAX_UPGRADE_RANK));
+  const ref = basis === 'reference' ? upgradeReferenceStats(ruleset) : null;
+  const f = (stat: Exclude<UpgradeStat, 'critChance'>) => round3(b[stat] + ((ref ? ref[stat] : b[stat]) * MAX_RANK_BONUS[stat] * clampRank(ranks[stat])) / MAX_UPGRADE_RANK);
   return {
     stats: { health: f('health'), attack: f('attack'), defense: f('defense'), stamina: f('stamina'), speed: f('speed'), weight: b.weight },
     critChance: round3(BASE_CRIT_CHANCE + (MAX_RANK_BONUS.critChance * clampRank(ranks.critChance)) / MAX_UPGRADE_RANK),

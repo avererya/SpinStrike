@@ -69,6 +69,8 @@ export class BattleTelemetry {
   damagingHits = 0;
   repeatedImpacts = 0;
   contactSteps = 0;
+  /** Last step on which the rings touched (−1 = never). Observation only. */
+  lastContactStep = -1;
   firstContactStep = -1;
   readonly hitSteps: number[] = [];
   private readonly sampleEvery: number;
@@ -113,6 +115,7 @@ export class BattleTelemetry {
   onStep(step: number, a: TopBody, b: TopBody, touching: boolean): void {
 
     if (touching) {
+      this.lastContactStep = step;
       this.contactSteps++;
       this.sustainedSteps++;
     } else this.sustainedSteps = 0;
